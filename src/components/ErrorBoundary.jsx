@@ -1,8 +1,10 @@
 import { Component } from 'react'
 import { AlertTriangle, RefreshCw, Home } from 'lucide-react'
+import { supabase } from '../services/supabase'
 
 // Capture les erreurs React non gérées dans le sous-arbre.
 // Affiche un écran propre en français au lieu d'un écran blanc.
+// En production, logue automatiquement l'erreur dans Supabase pour détecter les bugs.
 export default class ErrorBoundary extends Component {
   constructor(props) {
     super(props)
@@ -14,8 +16,25 @@ export default class ErrorBoundary extends Component {
   }
 
   componentDidCatch(error, info) {
-    // En prod on pourrait logger vers Supabase / Sentry ici.
     console.error('[ErrorBoundary]', error, info)
+
+    // Log automatique en production dans la table actions_log (best-effort)
+    if (import.meta.env.PROD) {
+      supabase.auth.getUser().then(({ data }) => {
+        supabase.from('actions_log').insert({
+          user_id:     data?.user?.id ?? null,
+          type:        'js_error',
+          description: error?.message ?? 'Unknown error',
+          metadata: {
+            stack:     error?.stack?.slice(0, 500),
+            component: info?.componentStack?.slice(0, 300),
+            url:       window.location.href,
+            ua:        navigator.userAgent.slice(0, 150),
+          },
+          created_at: new Date().toISOString(),
+        }).then(() => {}).catch(() => {})
+      })
+    }
   }
 
   handleReload = () => {
@@ -43,8 +62,9 @@ export default class ErrorBoundary extends Component {
             recharger la page sans risque.
           </p>
 
-          {import.meta.env.DEV && this.state.error && (
-            <pre className="text-[10px] text-left bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 mb-4 overflow-x-auto text-slate-600">
+          {/* Message d'erreur — toujours visible pour pouvoir signaler le bug */}
+          {this.state.error && (
+            <pre className="text-[10px] text-left bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 mb-4 overflow-x-auto text-slate-600 select-all">
               {this.state.error.message}
             </pre>
           )}
