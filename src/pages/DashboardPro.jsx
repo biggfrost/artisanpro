@@ -105,7 +105,7 @@ export default function DashboardPro() {
     for (let i = 5; i >= 0; i--) {
       const start = new Date(now.getFullYear(), now.getMonth() - i, 1)
       const end   = new Date(now.getFullYear(), now.getMonth() - i + 1, 1)
-      const ca    = engages.filter((d) => { const dt = devisDate(d); return dt >= start && dt < end })
+      const ca    = acceptes.filter((d) => { const dt = devisDate(d); return dt >= start && dt < end })
                            .reduce((s, d) => s + amountHT(d), 0)
       monthly.push({ label: start.toLocaleDateString('fr-FR', { month: 'short' }), value: ca })
     }
