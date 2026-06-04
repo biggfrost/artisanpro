@@ -37,11 +37,11 @@ const FILTERS = [
   { value: 'relance',               label: '🔔 Relances'   },
 ]
 
-// Statut = métadonnée (état métier), modifiable. Le CONTENU du devis lui
-// reste verrouillé conformément à l'article 286 du CGI (anti-fraude).
+// Statuts modifiables MANUELLEMENT par le manager.
+// ⚠️  'accepte' est INTENTIONNELLEMENT absent : un devis ne peut être accepté
+//     que par la signature électronique du client. Toute autre voie est invalide.
 const STATUS_LABELS = {
   envoye:  'Marquer Envoyé',
-  accepte: 'Marquer Accepté',
   refuse:  'Marquer Refusé',
   annule:  'Marquer Annulé',
 }
@@ -98,7 +98,8 @@ export default function Devis() {
 
   // Synchronise depuis Supabase : pour chaque devis local ayant un tokenUnique
   // et qui n'est pas encore accepté, vérifie si le client l'a signé.
-  // Si oui → marque le devis comme « accepté » automatiquement.
+  // C'est la SEULE voie légitime pour passer un devis en statut 'accepte'.
+  // En cas d'acceptation : marque le devis + crée automatiquement le chantier.
   const syncSignedDevis = useCallback(async () => {
     const list = devisRef.current
     const tokens = list
@@ -111,14 +112,36 @@ export default function Devis() {
     for (const s of signed) {
       const local = list.find((d) => d.tokenUnique === s.token)
       if (local && local.statut !== 'accepte') {
+        // 1. Marque le devis comme accepté (signature client reçue)
+        const devisAccepte = {
+          ...local,
+          statut:      'accepte',
+          signedAt:    s.signe_le,
+          signedVille: s.ville_client,
+        }
         upd(local.id, {
           statut:      'accepte',
           signedAt:    s.signe_le,
           signedVille: s.ville_client,
         })
+
+        // 2. Crée automatiquement le chantier correspondant (statut planifie)
+        //    uniquement si aucun chantier n'existe déjà pour ce devis
+        if (ent?.id) {
+          try {
+            const dejaPresent = await chantierExisteDejaPourDevis(local.numero)
+            if (!dejaPresent) {
+              const chantierForm = chantierFromDevis(devisAccepte)
+              await createChantier(ent.id, chantierForm)
+              toast.success(`✅ Devis ${local.numero} accepté — chantier créé automatiquement`)
+            } else {
+              toast.success(`✅ Devis ${local.numero} signé par le client`)
+            }
+          } catch { /* silencieux */ }
+        }
       }
     }
-  }, [])
+  }, [ent?.id, toast])
 
   // Sync au montage + quand l'onglet redevient visible (l'utilisateur revient sur l'app).
   useEffect(() => {
@@ -179,29 +202,14 @@ export default function Devis() {
     setModalOpen(false)
     setPrefill(null)
 
-    // Side effects : auto-création du client et du chantier en Supabase.
-    // Best-effort silencieux — n'affecte pas la création principale du devis.
+    // Side effect : synchronise le client dans Supabase.
+    // Le chantier sera créé automatiquement UNIQUEMENT quand le client
+    // signe le devis — pas avant. Créer un chantier avant signature serait
+    // illogique (le client n'a pas encore accepté la mission).
     if (ent?.id) {
       try {
-        // 1. Client : sélectionné via picker, ou recherche par nom, ou création
-        const { data: client } = await findOrCreateClient(ent.id, devisAvecNumero)
-        const message = []
-        if (client) message.push(`Client : ${client.nom}`)
-
-        // 2. Chantier : un par devis (dedupe par numéro déjà présent dans nom)
-        const dejaPresent = await chantierExisteDejaPourDevis(numero)
-        if (!dejaPresent) {
-          const chantierForm = chantierFromDevis(devisAvecNumero)
-          const { data: chantier } = await createChantier(ent.id, chantierForm)
-          if (chantier) message.push(`Chantier : ${chantier.nom}`)
-        }
-
-        if (message.length) {
-          toast.success(`Synchronisé : ${message.join(' · ')}`)
-        }
-      } catch (e) {
-        console.warn('[devis] auto-création client/chantier échouée:', e?.message)
-      }
+        await findOrCreateClient(ent.id, devisAvecNumero)
+      } catch { /* silencieux */ }
     }
   }
 

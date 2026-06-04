@@ -14,7 +14,6 @@ import { formatCurrency, formatDate } from '../../utils/formatters'
 import { getNextDevisNumber } from '../../utils/devisNumero'
 import { downloadDevisPdf, envoyerDevisPdf } from '../../utils/devisPdf'
 import { loadArtisanProfilSupabase, getSignatureParToken } from '../../services/supabase'
-import { chantierFromDevis, createChantier, chantierExisteDejaPourDevis } from '../../services/chantiersService'
 import { findOrCreateClient } from '../../services/clientsService'
 import { useToast } from '../../contexts/ToastContext'
 
@@ -120,15 +119,11 @@ export default function OuvrierDevis() {
     setModalOpen(false)
     toast.success('Devis envoyé au manager pour validation')
 
-    // Side effects best-effort
+    // Synchronise uniquement le client — le chantier sera créé automatiquement
+    // quand le client signe le devis (logique métier : pas de chantier sans accord client).
     if (entreprise?.id) {
       try {
         await findOrCreateClient(entreprise.id, payload)
-        const dejaPresent = await chantierExisteDejaPourDevis(payload.numero)
-        if (!dejaPresent) {
-          const cf = chantierFromDevis(payload)
-          await createChantier(entreprise.id, cf)
-        }
       } catch { /* silencieux */ }
     }
   }

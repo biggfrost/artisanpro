@@ -2,7 +2,7 @@
 import { useLocation } from 'react-router-dom'
 import {
   Plus, Pencil, Trash2, HardHat,
-  CalendarDays, User, FileText, CheckCircle2,
+  CalendarDays, User, FileText, CheckCircle2, AlertTriangle, Link2,
 } from 'lucide-react'
 import { useChantiers } from '../hooks/useChantiers'
 import Modal from '../components/Modal'
@@ -216,9 +216,35 @@ export default function Chantiers() {
   )
 }
 
+// Détecte si un chantier est lié à un devis signé (notes générées par chantierFromDevis)
+function isLinkedToDevis(chantier) {
+  return chantier.notes?.includes('Issu du devis') || false
+}
+
 function ChantierCard({ chantier, onEdit, onDelete, onToggle }) {
+  const linkedToDevis = isLinkedToDevis(chantier)
+  const isOrphan = !linkedToDevis // chantier créé sans devis signé associé
+
   return (
-    <div className="bg-white rounded-2xl p-4 shadow-card border border-slate-100">
+    <div className={`bg-white rounded-2xl p-4 shadow-card border ${isOrphan ? 'border-amber-200' : 'border-slate-100'}`}>
+      {/* Bandeau orphelin */}
+      {isOrphan && (
+        <div className="flex items-center gap-1.5 bg-amber-50 rounded-xl px-2.5 py-1.5 mb-3 -mt-0.5">
+          <AlertTriangle size={12} className="text-amber-500 flex-shrink-0" />
+          <p className="text-[11px] text-amber-700 font-medium">
+            Aucun devis signé associé — ce chantier a été créé manuellement
+          </p>
+        </div>
+      )}
+      {linkedToDevis && (
+        <div className="flex items-center gap-1.5 bg-emerald-50 rounded-xl px-2.5 py-1.5 mb-3 -mt-0.5">
+          <Link2 size={12} className="text-emerald-600 flex-shrink-0" />
+          <p className="text-[11px] text-emerald-700 font-medium">
+            {chantier.notes?.match(/Issu du devis ([^\s]+)/)?.[1] && `Devis ${chantier.notes.match(/Issu du devis ([^\s]+)/)[1]} signé`}
+          </p>
+        </div>
+      )}
+
       {/* Top */}
       <div className="flex items-start justify-between gap-2 mb-3">
         <div className="flex-1 min-w-0">

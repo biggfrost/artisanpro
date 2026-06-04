@@ -78,22 +78,19 @@ export default function DashboardPro() {
     const refuses   = allDevis.filter((d) => d.statut === 'refuse')
     const enAttente = allDevis.filter((d) => d.statut === 'en_attente_validation')
 
-    // CA engagé = acceptés + envoyés (tout devis non refusé/annulé)
-    // Utile quand les devis sont envoyés mais pas encore formellement "acceptés"
-    const engages = [...acceptes, ...envoyes]
-
-    const caTotal    = engages.reduce((s, d) => s + amountHT(d), 0)
-    const caAccepte  = acceptes.reduce((s, d) => s + amountHT(d), 0)
-    const caAnnee    = engages.filter((d) => devisDate(d) >= yearStart).reduce((s, d) => s + amountHT(d), 0)
-    const caMois     = engages.filter((d) => devisDate(d) >= monthStart).reduce((s, d) => s + amountHT(d), 0)
-    const caMoisPrec = engages
+    // CA = uniquement les devis formellement acceptés via signature électronique.
+    // Un devis "envoyé" n'est pas du CA — le client n'a pas encore accepté.
+    const caTotal    = acceptes.reduce((s, d) => s + amountHT(d), 0)
+    const caAnnee    = acceptes.filter((d) => devisDate(d) >= yearStart).reduce((s, d) => s + amountHT(d), 0)
+    const caMois     = acceptes.filter((d) => devisDate(d) >= monthStart).reduce((s, d) => s + amountHT(d), 0)
+    const caMoisPrec = acceptes
       .filter((d) => { const dt = devisDate(d); return dt >= prevMonthStart && dt < monthStart })
       .reduce((s, d) => s + amountHT(d), 0)
 
     const variationPct  = caMoisPrec > 0 ? ((caMois - caMoisPrec) / caMoisPrec) * 100 : null
-    const decidesTotal  = engages.length + refuses.length
-    const tauxTransfo   = decidesTotal > 0 ? (engages.length / decidesTotal) * 100 : 0
-    const panierMoyen   = engages.length > 0 ? caTotal / engages.length : 0
+    const decidesTotal  = acceptes.length + refuses.length
+    const tauxTransfo   = decidesTotal > 0 ? (acceptes.length / decidesTotal) * 100 : 0
+    const panierMoyen   = acceptes.length > 0 ? caTotal / acceptes.length : 0
 
     // Devis expirant sous 7 jours
     const in7Days = new Date(); in7Days.setDate(in7Days.getDate() + 7)
@@ -123,10 +120,9 @@ export default function DashboardPro() {
     const ouvrierCount = ouvriers.length
 
     return {
-      caTotal, caAccepte, caAnnee, caMois, caMoisPrec, variationPct,
+      caTotal, caAnnee, caMois, caMoisPrec, variationPct,
       tauxTransfo, panierMoyen, expirentBientot, monthly, maxMonthly,
       acceptesCount:   acceptes.length,
-      engagesCount:    engages.length,
       envoyesCount:    envoyes.length,
       refusesCount:    refuses.length,
       enAttenteCount:  enAttente.length,
@@ -174,7 +170,7 @@ export default function DashboardPro() {
             <div className="absolute -right-12 -bottom-12 w-32 h-32 rounded-full bg-white/5" />
             <div className="relative">
               <p className="text-[10px] text-blue-200 font-semibold uppercase tracking-widest">
-                CA engagé · {new Date().toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
+                CA accepté (devis signés) · {new Date().toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
               </p>
               <p className="text-3xl font-bold mt-1 tabular-nums">{formatCurrency(stats.caMois)}</p>
               {stats.variationPct !== null ? (
@@ -190,9 +186,9 @@ export default function DashboardPro() {
               ) : (
                 <p className="text-xs text-blue-200 mt-2">Premier mois enregistré</p>
               )}
-              {stats.caAccepte > 0 && stats.caAccepte < stats.caMois && (
-                <p className="text-[10px] text-emerald-300 mt-1">
-                  ✓ {formatCurrency(stats.caAccepte)} formellement acceptés
+              {stats.envoyesCount > 0 && (
+                <p className="text-[10px] text-blue-300 mt-1">
+                  + {stats.envoyesCount} devis envoyés en attente de signature client
                 </p>
               )}
             </div>
@@ -200,11 +196,11 @@ export default function DashboardPro() {
 
           {/* 4 KPIs devis — cliquables */}
           <div className="grid grid-cols-2 gap-3 mb-4">
-            <KpiCard icon={Euro}         label="CA annuel engagé"      value={formatCurrency(stats.caAnnee)}          color="emerald" onClick={() => navigate('/manager/devis')} />
-            <KpiCard icon={Target}       label="Taux de transformation" value={`${stats.tauxTransfo.toFixed(0)} %`}  color="blue"    onClick={() => navigate('/manager/devis')}
-              hint={`${stats.engagesCount} engagés / ${stats.engagesCount + stats.refusesCount} total`} />
-            <KpiCard icon={ShoppingCart} label="Panier moyen"          value={formatCurrency(stats.panierMoyen)}     color="amber"   onClick={() => navigate('/manager/devis')} />
-            <KpiCard icon={Award}        label="Devis acceptés"        value={`${stats.acceptesCount} / ${stats.engagesCount}`} color="violet" onClick={() => navigate('/manager/devis', { state: { filter: 'accepte' } })} />
+            <KpiCard icon={Euro}         label="CA annuel signé"        value={formatCurrency(stats.caAnnee)}                              color="emerald" onClick={() => navigate('/manager/devis', { state: { filter: 'accepte' } })} />
+            <KpiCard icon={Target}       label="Taux de transformation" value={`${stats.tauxTransfo.toFixed(0)} %`}                        color="blue"    onClick={() => navigate('/manager/devis')}
+              hint={`${stats.acceptesCount} signés / ${stats.acceptesCount + stats.refusesCount} décidés`} />
+            <KpiCard icon={ShoppingCart} label="Panier moyen signé"    value={formatCurrency(stats.panierMoyen)}                           color="amber"   onClick={() => navigate('/manager/devis', { state: { filter: 'accepte' } })} />
+            <KpiCard icon={Award}        label="Devis signés"          value={`${stats.acceptesCount}`}                                    color="violet"  onClick={() => navigate('/manager/devis', { state: { filter: 'accepte' } })} />
           </div>
 
           {/* Stats chantiers — cliquables */}
@@ -315,8 +311,8 @@ export default function DashboardPro() {
               <span className="text-xs text-slate-400">{stats.totalDevis} au total</span>
             </div>
             <div className="space-y-3">
-              <StatusBar label="Acceptés"         count={stats.acceptesCount}  total={stats.totalDevis} color="bg-emerald-500" onClick={() => navigate('/manager/devis', { state: { filter: 'accepte' } })} />
-              <StatusBar label="Envoyés (en cours)" count={stats.envoyesCount} total={stats.totalDevis} color="bg-blue-500"    onClick={() => navigate('/manager/devis', { state: { filter: 'envoye' } })} />
+              <StatusBar label="Signés par client" count={stats.acceptesCount}  total={stats.totalDevis} color="bg-emerald-500" onClick={() => navigate('/manager/devis', { state: { filter: 'accepte' } })} />
+              <StatusBar label="Envoyés (en attente signature)" count={stats.envoyesCount} total={stats.totalDevis} color="bg-blue-500" onClick={() => navigate('/manager/devis', { state: { filter: 'envoye' } })} />
               <StatusBar label="En attente valid." count={stats.enAttenteCount} total={stats.totalDevis} color="bg-amber-400"  onClick={() => navigate('/manager/devis')} />
               <StatusBar label="Refusés"          count={stats.refusesCount}    total={stats.totalDevis} color="bg-red-400"    onClick={() => navigate('/manager/devis', { state: { filter: 'refuse' } })} />
             </div>
