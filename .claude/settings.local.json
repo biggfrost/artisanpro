@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(npm run *)",
+      "Bash(node -e ' *)",
+      "Bash(npm uninstall *)",
+      "Bash(node -e \"console.log\\(require\\('./node_modules/@supabase/supabase-js/package.json'\\).version\\)\")",
+      "Bash(curl -s -X GET \"https://zptxycatjuhjhjpsctot.supabase.co/rest/v1/devis?select=count&limit=1\" -H \"apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpwdHh5Y2F0anVoamhqcHNjdG90Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3MDgyNDEsImV4cCI6MjA5NDI4NDI0MX0.r38Zuz-BbI9OD2tzYfc1rA0uI8xVK1wxIRJwBb6qBr8\" -H \"Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpwdHh5Y2F0anVoamhqcHNjdG90Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3MDgyNDEsImV4cCI6MjA5NDI4NDI0MX0.r38Zuz-BbI9OD2tzYfc1rA0uI8xVK1wxIRJwBb6qBr8\")",
+      "Bash(awk 'NR>=269 && NR<=274 {print NR\": \"length\\($0\\)\" bytes: \"$0}' \"C:/Users/vladime/app artisan/src/pages/Signer.jsx\")",
+      "Bash(awk 'NR==269' \"C:/Users/vladime/app artisan/src/pages/Signer.jsx\")",
+      "PowerShell($path = \"C:\\\\Users\\\\vladime\\\\app artisan\\\\src\\\\pages\\\\Signer.jsx\"; $content = [System.IO.File]::ReadAllText\\($path\\); $pattern = \"              \\\\{false && \\\\\\(`r?`n                <p className=`\"text-xs text-slate-500`\">`r?`n                  \\\\{\\\\[devis\\\\.client_code_postal, devis\\\\.client_ville\\\\]\\\\.filter\\\\\\(Boolean\\\\\\)\\\\.join\\\\\\('[^']+'\\\\\\)\\\\}`r?`n                </p>`r?`n              \\\\\\)\\\\}`r?`n\"; $new = [System.Text.RegularExpressions.Regex]::Replace\\($content, $pattern, ''\\); [System.IO.File]::WriteAllText\\($path, $new, [System.Text.UTF8Encoding]::new\\($false\\)\\); \"Done. New length: $\\($new.Length\\)\")",
+      "PowerShell($h = @{ \"apikey\" = \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpwdHh5Y2F0anVoamhqcHNjdG90Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3MDgyNDEsImV4cCI6MjA5NDI4NDI0MX0.r38Zuz-BbI9OD2tzYfc1rA0uI8xVK1wxIRJwBb6qBr8\"; \"Authorization\" = \"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpwdHh5Y2F0anVoamhqcHNjdG90Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3MDgyNDEsImV4cCI6MjA5NDI4NDI0MX0.r38Zuz-BbI9OD2tzYfc1rA0uI8xVK1wxIRJwBb6qBr8\" }; try { $r = Invoke-WebRequest -Uri \"https://zptxycatjuhjhjpsctot.supabase.co/rest/v1/\" -Headers $h -UseBasicParsing -TimeoutSec 15; $r.Content.Substring\\(0, [Math]::Min\\(8000, $r.Content.Length\\)\\) } catch { \"ERROR: $_\" })",
+      "PowerShell(Copy-Item \"C:\\\\Users\\\\vladime\\\\app artisan\\\\public\\\\sw.js\" \"C:\\\\Users\\\\vladime\\\\app artisan\\\\dist\\\\sw.js\" -Force)",
+      "PowerShell(cd \"C:\\\\Users\\\\vladime\\\\app artisan\"; npm run build 2>&1 | Where-Object { $_ -match \"error|warning|built\" } | Select-Object -Last 15)",
+      "mcp__Claude_Preview__preview_start"
+    ]
+  }
+}

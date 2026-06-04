@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" fill="none">
+  <rect width="192" height="192" fill="#1e3a8a"/>
+  <!-- House shape -->
+  <path d="M96 48L150 86V148H42V86L96 48Z" stroke="white" stroke-width="7" stroke-linejoin="round" fill="none"/>
+  <path d="M36 90L96 44L156 90" stroke="white" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Door -->
+  <rect x="78" y="108" width="36" height="40" rx="5" fill="white"/>
+  <!-- Orange badge with wrench -->
+  <circle cx="150" cy="148" r="24" fill="#f97316"/>
+  <g transform="translate(139,137)" fill="white">
+    <path d="M15 2C12 2 9.5 3.5 8 6L11.5 9.5L9.5 11.5L6 8C3.5 9.5 2 12 2 15C2 20 6 24 11 24C12.3 24 13.5 23.7 14.6 23.1L8.5 17L13.5 12L19.6 18.1C20.3 17 20.7 15.6 20.7 14C20.7 7.5 18 2 15 2Z"/>
+  </g>
+</svg>
