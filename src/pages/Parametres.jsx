@@ -6,8 +6,8 @@ import {
   LogOut, Eraser,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { loadParametres, saveParametres } from '../services/parametres'
-import { saveArtisanProfilSupabase, testSupabaseConnection } from '../services/supabase'
+import { loadParametres, saveParametres, DEFAULT_PARAMETRES } from '../services/parametres'
+import { saveArtisanProfilSupabase, loadArtisanProfilSupabase, testSupabaseConnection } from '../services/supabase'
 import { signOut } from '../services/auth'
 import { ensureManagerEntreprise } from '../services/entrepriseService'
 import { useAuth } from '../contexts/AuthContext'
@@ -119,15 +119,42 @@ const gridCls  = 'grid grid-cols-2 gap-3'
 export default function Parametres() {
   const navigate = useNavigate()
   const { user, entreprise, refresh } = useAuth()
-  const [form, setForm] = useState(loadParametres)
-  const [saved, setSaved] = useState(false)
+  const [form, setForm]       = useState(loadParametres)
+  const [saved, setSaved]     = useState(false)
   const [syncing, setSyncing] = useState(false)
+  const [syncingLoad, setSyncingLoad] = useState(false)
   const [errors, setErrors] = useState({})
   const [dbTesting, setDbTesting]     = useState(false)
   const [dbStatus,  setDbStatus]      = useState(null)   // null | 'ok' | 'error'
   const [sqlCopied, setSqlCopied]     = useState(false)
   const [showSetup, setShowSetup]     = useState(false)
   const [autoRepaired, setAutoRepaired] = useState(false)
+
+  // Synchronisation depuis Supabase au montage.
+  // Sur un nouveau téléphone, localStorage est vide → on charge depuis Supabase.
+  // Sur le même appareil, on fusionne (Supabase gagne sauf si localStorage plus récent).
+  useEffect(() => {
+    if (!user) return
+    let cancelled = false
+    ;(async () => {
+      setSyncingLoad(true)
+      const profil = await loadArtisanProfilSupabase()
+      if (cancelled || !profil?.donnees_json) { setSyncingLoad(false); return }
+
+      const supabaseParams = profil.donnees_json
+      const localParams    = loadParametres()
+
+      // Si les params locaux sont vides (nouveau téléphone), on prend Supabase
+      const localIsEmpty = !localParams.nom && !localParams.raisonSociale && !localParams.siret
+      if (localIsEmpty) {
+        const merged = { ...DEFAULT_PARAMETRES, ...supabaseParams }
+        saveParametres(merged)
+        setForm(merged)
+      }
+      setSyncingLoad(false)
+    })()
+    return () => { cancelled = true }
+  }, [user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-réparation silencieuse : si l'utilisateur connecté n'a pas
   // d'entreprise liée, on la crée. Cela débloque l'invitation d'ouvriers
@@ -284,6 +311,14 @@ export default function Parametres() {
         <h1 className="text-2xl font-bold text-primary-900">Paramètres</h1>
         <p className="text-sm text-slate-500 mt-0.5">Informations utilisées dans vos devis PDF</p>
       </div>
+
+      {/* Bandeau synchronisation en cours */}
+      {syncingLoad && (
+        <div className="flex items-center gap-2.5 bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 mb-4">
+          <Loader2 size={15} className="text-blue-600 animate-spin flex-shrink-0" />
+          <p className="text-xs text-blue-700 font-medium">Synchronisation depuis votre compte…</p>
+        </div>
+      )}
 
       {/* Auto-repair confirmation */}
       {autoRepaired && (

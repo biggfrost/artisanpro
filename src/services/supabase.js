@@ -157,7 +157,8 @@ export async function testSupabaseConnection() {
 // ─── artisan_profil ──────────────────────────────────────────────
 
 function profilPayloadFromForm(form) {
-  return {
+  // Champs indexés dans des colonnes dédiées (rapide à requêter)
+  const indexed = {
     nom:              form.raisonSociale || form.nom || '',
     adresse:          [form.adresse, form.codePostal].filter(Boolean).join(' '),
     ville:            form.ville || '',
@@ -168,6 +169,16 @@ function profilPayloadFromForm(form) {
     forme_juridique:  form.formeJuridique || '',
     signature_base64: form.signatureArtisan || null,
   }
+
+  // donnees_json = TOUS les paramètres (y compris assurance, CGV, logo…)
+  // C'est la source de vérité pour synchroniser entre appareils.
+  const { signatureArtisan, ...restForJson } = form
+  const donnees_json = {
+    ...restForJson,
+    signatureArtisan: form.signatureArtisan || null,
+  }
+
+  return { ...indexed, donnees_json }
 }
 
 export async function saveArtisanProfilSupabase(localParams) {
@@ -225,20 +236,25 @@ export async function loadArtisanProfilSupabase() {
     console.log('[Supabase] loadArtisanProfilSupabase — aucun profil')
     return null
   }
-  console.log('[Supabase] loadArtisanProfilSupabase — profil trouvé, signature_base64 présente:', !!data.signature_base64)
-
+  // donnees_json contient TOUS les paramètres sauvegardés depuis v2.
+  // On le fusionne avec les colonnes indexées pour garantir la cohérence.
+  const fromJson = data.donnees_json || {}
   return {
     signature_base64: data.signature_base64,
     donnees_json: {
-      nom:            data.nom,
-      raisonSociale:  data.nom,
-      adresse:        data.adresse,
-      ville:          data.ville,
-      telephone:      data.telephone,
-      email:          data.email,
-      siret:          data.siret,
-      tvaIntracom:    data.tva,
-      formeJuridique: data.forme_juridique,
+      // Priorité : données JSON complètes (version la plus récente et complète)
+      ...fromJson,
+      // Colonnes indexées en override pour cohérence avec la DB
+      nom:              data.nom              || fromJson.nom || fromJson.raisonSociale || '',
+      raisonSociale:    data.nom              || fromJson.raisonSociale || '',
+      adresse:          data.adresse          || fromJson.adresse || '',
+      ville:            data.ville            || fromJson.ville || '',
+      telephone:        data.telephone        || fromJson.telephone || '',
+      email:            data.email            || fromJson.email || '',
+      siret:            data.siret            || fromJson.siret || '',
+      tvaIntracom:      data.tva              || fromJson.tvaIntracom || '',
+      formeJuridique:   data.forme_juridique  || fromJson.formeJuridique || '',
+      signatureArtisan: data.signature_base64 || fromJson.signatureArtisan || null,
     },
   }
 }
