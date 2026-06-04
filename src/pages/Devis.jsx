@@ -56,6 +56,9 @@ export default function Devis() {
   const { devis, addDevis, updateDevis } = useDevis()
   const location   = useLocation()
   const navigate   = useNavigate()
+  // Déclarés tôt pour être disponibles dans syncSignedDevis (useCallback)
+  const ent  = useAuth().entreprise
+  const toast = useToast()
   const [search, setSearch]               = useState('')
   const [filter, setFilter]               = useState(() => location.state?.filter ?? 'tous')
   const [sortDesc, setSortDesc]           = useState(true)
@@ -287,9 +290,6 @@ export default function Devis() {
     setSigError(null)
     setCopied(false)
   }
-
-  const ent = useAuth().entreprise
-  const toast = useToast()
 
   // ── Devis ouvriers en attente de validation ──────────────────────
   const devisEnAttente = useMemo(() =>
