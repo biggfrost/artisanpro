@@ -1,9 +1,11 @@
 import { supabase } from './supabase'
 
 // Embed du créateur via la FK explicite devis_cree_par_fkey.
+// !left = LEFT JOIN : les devis sans cree_par (créés par le manager directement)
+// sont inclus avec createur=null, au lieu d'être exclus par un INNER JOIN.
 const SELECT_WITH_CREATOR = `
   *,
-  createur:utilisateurs!devis_cree_par_fkey ( id, nom, prenom, role )
+  createur:utilisateurs!devis_cree_par_fkey!left ( id, nom, prenom, role )
 `
 
 // RLS filtre automatiquement :

@@ -25,6 +25,7 @@ import { findOrCreateClient } from '../services/clientsService'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../contexts/ToastContext'
 import { shareDevis } from '../utils/share'
+import { mergeDevis } from '../utils/mergeDevis'
 import { haptic } from '../utils/haptics'
 import { exportDevisCSV } from '../services/exportCsv'
 
@@ -84,56 +85,10 @@ export default function Devis() {
   }, [])
 
   // Fusion localStorage + Supabase.
-  // Règles de déduplication :
-  //   1. Dans Supabase lui-même : si deux rows ont le même numéro, on garde
-  //      le devis ouvrier (créé via le workflow de validation). Sinon le plus récent.
-  //   2. Un devis ouvrier Supabase prend la priorité sur un devis local ayant
-  //      le même numéro (les deux apps peuvent générer le même numéro
-  //      indépendamment depuis leur localStorage respectif).
-  //   3. Les autres devis Supabase sont exclus si un local avec même numéro
-  //      ou même tokenUnique existe déjà.
-  const mergedDevis = useMemo(() => {
-    // ── Étape 1 : déduplication interne Supabase par numéro ──────
-    const dedupedSupabase = Object.values(
-      supabaseDevis.reduce((acc, d) => {
-        if (!d.numero) { acc[d.id] = d; return acc }
-        const existing = acc[d.numero]
-        if (!existing) { acc[d.numero] = d; return acc }
-        // Priorité : devis ouvrier > devis manager > devis sans créateur
-        const dIsOuvrier  = d.createur?.role === 'ouvrier'
-        const exIsOuvrier = existing.createur?.role === 'ouvrier'
-        if (dIsOuvrier && !exIsOuvrier) { acc[d.numero] = d; return acc }
-        // Sinon on garde le plus récent
-        if (!dIsOuvrier && !exIsOuvrier) {
-          if (new Date(d.createdAt) > new Date(existing.createdAt)) acc[d.numero] = d
-        }
-        return acc
-      }, {})
-    )
-
-    // ── Étape 2 : fusion local + supabase dédupliqué ─────────────
-    const localTokens = new Set(devis.filter((d) => d.tokenUnique).map((d) => d.tokenUnique))
-    const externalDevis = dedupedSupabase.filter((d) => !d.tokenUnique || !localTokens.has(d.tokenUnique))
-
-    const ouvrierNumeros = new Set(
-      externalDevis
-        .filter((d) => d.createur?.role === 'ouvrier')
-        .map((d) => d.numero)
-        .filter(Boolean)
-    )
-    const localNumeros = new Set(devis.map((d) => d.numero).filter(Boolean))
-
-    return [
-      // Local : exclure si un devis ouvrier Supabase occupe le même numéro
-      ...devis.filter((d) => !d.numero || !ouvrierNumeros.has(d.numero)),
-      // Supabase externe : ouvriers toujours inclus, autres dédupliqués contre local
-      ...externalDevis.filter((d) =>
-        d.createur?.role === 'ouvrier'
-        || !d.numero
-        || !localNumeros.has(d.numero)
-      ),
-    ]
-  }, [devis, supabaseDevis])
+  // mergeDevis garantit qu'un devis 'accepte' gagne toujours sur 'envoye',
+  // élimine les doublons internes à Supabase, et donne priorité aux devis
+  // ouvriers sur les copies locales de même numéro.
+  const mergedDevis = useMemo(() => mergeDevis(devis, supabaseDevis), [devis, supabaseDevis])
 
   // Refs pour que le sync utilise toujours les dernières versions sans relancer l'effet.
   const devisRef = useRef(devis)

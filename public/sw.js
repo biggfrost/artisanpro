@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'artisanpro-v2.0.0'
+const CACHE_VERSION = 'artisanpro-v2.1.0'
 const STATIC_CACHE  = `${CACHE_VERSION}-static`
 const DATA_CACHE    = `${CACHE_VERSION}-data`
 
