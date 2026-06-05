@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { triggerPush } from './pushTrigger'
 
 // Soft fail si géolocalisation indispo / refusée
 export function tryGeolocate() {
@@ -56,6 +57,13 @@ export async function startPointage(chantierId) {
     .insert(payload)
     .select('id, chantier_id, heure_arrivee, chantier:chantiers (id, nom, ville)')
     .single()
+
+  // Notifie les managers : ouvrier arrivé sur chantier.
+  // On passe ouvrier_id → l'Edge Function résout l'entreprise.
+  if (data && !error) {
+    triggerPush({ type: 'INSERT', table: 'pointages', record: { ouvrier_id: user.id, chantier_id: chantierId } })
+  }
+
   return { data, error }
 }
 

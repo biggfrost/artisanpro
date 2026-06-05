@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { pushAssignation } from './pushTrigger'
 
 // On JOIN sur chantiers pour récupérer le nom/ville/statut directement.
 // La syntaxe `chantier:chantiers (col1, col2…)` est l'embedding PostgREST.
@@ -28,6 +29,10 @@ export async function createAssignation({ ouvrierId, chantierId, dateDebut, date
     })
     .select(SELECT_WITH_CHANTIER)
     .single()
+
+  // Notifie l'ouvrier : nouveau chantier assigné (planning)
+  if (data && !error) pushAssignation({ ouvrier_id: ouvrierId, chantier_id: chantierId })
+
   return { data, error }
 }
 

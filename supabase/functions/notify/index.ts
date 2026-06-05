@@ -118,14 +118,22 @@ async function buildNotifications(payload: any) {
     })
   }
 
-  if (table === 'pointages' && type === 'INSERT' && record.entreprise_id) {
-    const mgrs = await managersOf(record.entreprise_id)
-    out.push({
-      userIds: mgrs,
-      title: '📍 Pointage ouvrier',
-      body: 'Un ouvrier vient de pointer son arrivée sur chantier.',
-      url: '/manager/ouvriers',
-    })
+  if (table === 'pointages' && type === 'INSERT' && record.ouvrier_id) {
+    // La table pointages n'a pas entreprise_id → on résout via l'ouvrier
+    const { data: ouv } = await admin
+      .from('utilisateurs')
+      .select('entreprise_id, prenom, nom')
+      .eq('id', record.ouvrier_id)
+      .maybeSingle()
+    if (ouv?.entreprise_id) {
+      const nom = `${ouv.prenom || ''} ${ouv.nom || ''}`.trim() || 'Un ouvrier'
+      out.push({
+        userIds: await managersOf(ouv.entreprise_id),
+        title: '📍 Pointage ouvrier',
+        body: `${nom} vient de pointer son arrivée sur chantier.`,
+        url: '/manager/ouvriers',
+      })
+    }
   }
 
   if (table === 'chantiers' && type === 'UPDATE') {

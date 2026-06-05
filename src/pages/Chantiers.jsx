@@ -19,6 +19,7 @@ import { formatDate } from '../utils/formatters'
 import { useToast } from '../contexts/ToastContext'
 import { listDevisAuthenticated, normalizeDevis } from '../services/devisService'
 import { acceptedDevisNumeros, isChantierLegitime, extractDevisNumero } from '../utils/chantierLogic'
+import { pushChantierTermine } from '../services/pushTrigger'
 
 const FILTERS = [
   { value: 'tous',     label: 'Tous'       },
@@ -115,6 +116,14 @@ export default function Chantiers() {
     }
 
     updateChantier(c.id, { statut: next })
+
+    // Notifie les managers quand un chantier est marqué terminé
+    if (next === 'termine') {
+      pushChantierTermine(
+        { id: c.id, nom: c.nom, statut: 'termine', entreprise_id: c.entreprise_id },
+        c.statut,
+      )
+    }
   }
 
   return (
