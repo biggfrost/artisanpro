@@ -22,6 +22,15 @@ webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC, VAPID_PRIVATE)
 
 const admin = createClient(SUPABASE_URL, SERVICE_KEY)
 
+// En-têtes CORS : indispensables pour que l'app (navigateur) puisse appeler
+// la fonction. Sans ça, le navigateur bloque l'appel (préflight OPTIONS).
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+}
+const jsonHeaders = { ...CORS, 'Content-Type': 'application/json' }
+
 // ── Helpers ────────────────────────────────────────────────────────
 async function managersOf(entrepriseId: string): Promise<string[]> {
   const { data } = await admin
@@ -203,6 +212,11 @@ async function testPushAll() {
 
 // ── HTTP handler ───────────────────────────────────────────────────
 Deno.serve(async (req) => {
+  // Préflight CORS : le navigateur envoie OPTIONS avant le POST
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: CORS })
+  }
+
   try {
     const payload = await req.json()
 
@@ -221,15 +235,13 @@ Deno.serve(async (req) => {
           endpoint: s.endpoint.slice(0, 55),
           created: s.created_at,
         })),
-      }), { headers: { 'Content-Type': 'application/json' } })
+      }), { headers: jsonHeaders })
     }
 
     // Mode test : envoie un push de test à tous les abonnements
     if (payload?.testPushAll) {
       const results = await testPushAll()
-      return new Response(JSON.stringify({ testPushAll: true, results }), {
-        headers: { 'Content-Type': 'application/json' },
-      })
+      return new Response(JSON.stringify({ testPushAll: true, results }), { headers: jsonHeaders })
     }
 
     console.log('[notify] reçu:', payload?.type, payload?.table)
@@ -239,13 +251,13 @@ Deno.serve(async (req) => {
     const totalSent = results.reduce((s, r) => s + (r?.sent || 0), 0)
     const totalSubs = results.reduce((s, r) => s + (r?.subs || 0), 0)
     return new Response(JSON.stringify({ ok: true, rules: notifs.length, subscriptions: totalSubs, pushed: totalSent, results }), {
-      headers: { 'Content-Type': 'application/json' },
+      headers: jsonHeaders,
     })
   } catch (e) {
     console.log('[notify] ERREUR:', String(e))
     return new Response(JSON.stringify({ ok: false, error: String(e) }), {
       status: 500,
-      headers: { 'Content-Type': 'application/json' },
+      headers: jsonHeaders,
     })
   }
 })
