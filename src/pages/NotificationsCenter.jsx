@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Bell, Trash2, ChevronRight, ArrowLeft, X } from 'lucide-react'
+import { Bell, BellRing, Trash2, ChevronRight, ArrowLeft, X, Loader2, CheckCircle } from 'lucide-react'
 import { useNotifications } from '../contexts/NotificationsContext'
 import { formatDateRelative } from '../utils/formatters'
+import { subscribeToPush, isPushSubscribed, pushSupported } from '../services/pushNotifications'
 
 const TYPE_ICONS = {
   devis_a_valider:  '📋',
@@ -20,6 +21,24 @@ export default function NotificationsCenter() {
   const navigate = useNavigate()
   const { notifications, unread, markAllRead, clearAll } = useNotifications()
   const [confirmClear, setConfirmClear] = useState(false)
+  const [pushState, setPushState] = useState('checking') // checking | on | off | unsupported
+  const [activating, setActivating] = useState(false)
+
+  // État de l'abonnement push
+  useEffect(() => {
+    if (!pushSupported()) { setPushState('unsupported'); return }
+    isPushSubscribed().then((ok) => setPushState(ok ? 'on' : 'off'))
+  }, [])
+
+  async function handleEnablePush() {
+    setActivating(true)
+    const res = await subscribeToPush()
+    setActivating(false)
+    setPushState(res.ok ? 'on' : 'off')
+    if (!res.ok && res.reason === 'denied') {
+      alert("Les notifications sont bloquées. Autorisez-les dans les réglages de votre navigateur/téléphone pour ArtisanPro.")
+    }
+  }
 
   // Marque tout comme lu 800ms après l'ouverture
   useEffect(() => {
@@ -58,6 +77,32 @@ export default function NotificationsCenter() {
           </button>
         )}
       </div>
+
+      {/* Activation des notifications push */}
+      {pushState === 'off' && (
+        <button
+          onClick={handleEnablePush}
+          disabled={activating}
+          className="w-full flex items-center gap-3 bg-primary-900 text-white rounded-2xl px-4 py-3.5 mb-4 text-left active:scale-[0.99] transition-transform"
+        >
+          <div className="w-10 h-10 rounded-xl bg-accent-500 flex items-center justify-center flex-shrink-0">
+            {activating ? <Loader2 size={18} className="animate-spin" /> : <BellRing size={18} />}
+          </div>
+          <div className="flex-1">
+            <p className="text-sm font-bold">Activer les notifications</p>
+            <p className="text-xs text-blue-200 mt-0.5">
+              Recevez les alertes même quand l'app est fermée
+            </p>
+          </div>
+          <ChevronRight size={18} className="text-blue-300 flex-shrink-0" />
+        </button>
+      )}
+      {pushState === 'on' && (
+        <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-100 rounded-xl px-3.5 py-2.5 mb-4">
+          <CheckCircle size={15} className="text-emerald-600 flex-shrink-0" />
+          <p className="text-xs text-emerald-700 font-medium">Notifications activées sur cet appareil</p>
+        </div>
+      )}
 
       {last30.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-24 text-center">

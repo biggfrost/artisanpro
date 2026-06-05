@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { supabase } from '../services/supabase'
 import { useAuth } from './AuthContext'
 import { vibrate } from '../utils/haptics'
+import { subscribeToPush, pushSupported } from '../services/pushNotifications'
 
 const NotificationsContext = createContext(null)
 
@@ -69,14 +70,16 @@ export function NotificationsProvider({ children }) {
     localStorage.setItem('artisanpro_notifs', '[]')
   }, [])
 
-  // Demande permission notifications après connexion
+  // Après connexion : demande la permission ET enregistre l'abonnement
+  // push (Web Push) pour recevoir les notifications même app fermée.
   useEffect(() => {
-    if (!isAuthenticated || !canNotify) return
-    if (Notification.permission === 'default') {
-      const t = setTimeout(() => Notification.requestPermission(), 4000)
-      return () => clearTimeout(t)
-    }
-  }, [isAuthenticated])
+    if (!isAuthenticated || !profile?.id) return
+    if (!pushSupported()) return
+    const t = setTimeout(() => {
+      subscribeToPush().catch(() => {})
+    }, 3000)
+    return () => clearTimeout(t)
+  }, [isAuthenticated, profile?.id])
 
   // Supabase Realtime — écoute les événements métier de l'entreprise
   useEffect(() => {

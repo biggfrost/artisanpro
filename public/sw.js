@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'artisanpro-v2.1.0'
+const CACHE_VERSION = 'artisanpro-v2.2.0'
 const STATIC_CACHE  = `${CACHE_VERSION}-static`
 const DATA_CACHE    = `${CACHE_VERSION}-data`
 
@@ -73,6 +73,50 @@ self.addEventListener('message', (event) => {
   if (event.data?.type === 'SKIP_WAITING') {
     self.skipWaiting()
   }
+})
+
+// ── Push : notification reçue (app fermée ou en arrière-plan) ───────
+self.addEventListener('push', (event) => {
+  let payload = {}
+  try {
+    payload = event.data ? event.data.json() : {}
+  } catch {
+    payload = { title: 'ArtisanPro', body: event.data ? event.data.text() : '' }
+  }
+
+  const title = payload.title || 'ArtisanPro'
+  const options = {
+    body:    payload.body || '',
+    icon:    '/icons/icon-192.png',
+    badge:   '/icons/icon-72.png',
+    tag:     payload.tag || undefined,
+    data:    { url: payload.url || '/' },
+    vibrate: [60, 30, 60],
+    requireInteraction: false,
+  }
+
+  event.waitUntil(self.registration.showNotification(title, options))
+})
+
+// ── Clic sur la notification : ouvre/focus l'app à la bonne page ────
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  const targetUrl = event.notification.data?.url || '/'
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((wins) => {
+      // Si une fenêtre est déjà ouverte → on la focus et on navigue
+      for (const win of wins) {
+        if ('focus' in win) {
+          win.focus()
+          if ('navigate' in win && targetUrl) win.navigate(targetUrl).catch(() => {})
+          return
+        }
+      }
+      // Sinon on ouvre une nouvelle fenêtre
+      if (clients.openWindow) return clients.openWindow(targetUrl)
+    })
+  )
 })
 
 // ── Stratégies ────────────────────────────────────────────────────
