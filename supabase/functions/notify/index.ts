@@ -180,10 +180,58 @@ async function sendToUsers(userIds: string[], notif: any) {
   return { subs: subs?.length || 0, sent, errors }
 }
 
+// Envoie un push de test à TOUS les abonnements (diagnostic)
+async function testPushAll() {
+  const { data: subs } = await admin.from('push_subscriptions').select('*')
+  const payload = JSON.stringify({
+    title: '🔔 Test ArtisanPro',
+    body:  'Si vous voyez ceci, les notifications fonctionnent !',
+    url:   '/',
+  })
+  const results: any[] = []
+  for (const s of (subs || [])) {
+    const subscription = { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }
+    try {
+      await webpush.sendNotification(subscription, payload)
+      results.push({ ua: (s.user_agent || '').slice(0, 30), endpoint: s.endpoint.slice(0, 45), ok: true })
+    } catch (err: any) {
+      results.push({ ua: (s.user_agent || '').slice(0, 30), endpoint: s.endpoint.slice(0, 45), ok: false, code: err?.statusCode, error: String(err?.body || err?.message).slice(0, 200) })
+    }
+  }
+  return results
+}
+
 // ── HTTP handler ───────────────────────────────────────────────────
 Deno.serve(async (req) => {
   try {
     const payload = await req.json()
+
+    // Mode diagnostic : état des abonnements
+    if (payload?.diag) {
+      const { count } = await admin.from('push_subscriptions').select('*', { count: 'exact', head: true })
+      const { data } = await admin.from('push_subscriptions')
+        .select('user_id, endpoint, user_agent, created_at').limit(10)
+      return new Response(JSON.stringify({
+        diag: true,
+        vapidSubject: VAPID_SUBJECT,
+        count,
+        subs: (data || []).map((s: any) => ({
+          user: s.user_id,
+          ua: (s.user_agent || '').slice(0, 40),
+          endpoint: s.endpoint.slice(0, 55),
+          created: s.created_at,
+        })),
+      }), { headers: { 'Content-Type': 'application/json' } })
+    }
+
+    // Mode test : envoie un push de test à tous les abonnements
+    if (payload?.testPushAll) {
+      const results = await testPushAll()
+      return new Response(JSON.stringify({ testPushAll: true, results }), {
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+
     console.log('[notify] reçu:', payload?.type, payload?.table)
     const notifs = await buildNotifications(payload)
     const results = []
