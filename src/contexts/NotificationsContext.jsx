@@ -29,6 +29,8 @@ export function NotificationsProvider({ children }) {
   })
   const channelRef = useRef(null)
 
+  // `notif.key` (optionnel) = clé stable pour dédupliquer (ex: `msg-<id>`).
+  // `notif.silent` (optionnel) = ne pas vibrer/notifier (sync silencieuse).
   const push = useCallback((notif) => {
     const item = {
       id: Date.now() + Math.random(),
@@ -36,16 +38,22 @@ export function NotificationsProvider({ children }) {
       createdAt: new Date().toISOString(),
       ...notif,
     }
+    let added = false
     setNotifications((prev) => {
+      // Déduplication par clé stable
+      if (item.key && prev.some((n) => n.key === item.key)) return prev
+      added = true
       const next = [item, ...prev].slice(0, MAX_NOTIFS)
       localStorage.setItem('artisanpro_notifs', JSON.stringify(next))
       return next
     })
-    vibrate(15)
-    if (canNotify && Notification.permission === 'granted') {
-      try {
-        new Notification(item.title, { body: item.body, icon: '/icons/icon-192.png', badge: '/icons/icon-72.png' })
-      } catch { /* silencieux si la notification échoue */ }
+    if (added && !notif.silent) {
+      vibrate(15)
+      if (canNotify && Notification.permission === 'granted') {
+        try {
+          new Notification(item.title, { body: item.body, icon: '/icons/icon-192.png', badge: '/icons/icon-72.png' })
+        } catch { /* silencieux si la notification échoue */ }
+      }
     }
   }, [])
 
@@ -80,6 +88,66 @@ export function NotificationsProvider({ children }) {
     }, 3000)
     return () => clearTimeout(t)
   }, [isAuthenticated, profile?.id])
+
+  // Synchronise le centre de notifications avec l'état réel de la base :
+  //  - messages non lus reçus (même reçus app fermée)
+  //  - manager : devis en attente de validation
+  // Crée des entrées dédupliquées (clé stable) au montage + périodiquement.
+  const syncFromDb = useCallback(async () => {
+    if (!profile?.id) return
+    const role = profile.role
+
+    // 1) Messages non lus dont je suis destinataire
+    const { data: msgs } = await supabase
+      .from('messages')
+      .select('id, contenu, type, media_nom, created_at, expediteur_id')
+      .eq('destinataire_id', profile.id)
+      .eq('lu', false)
+      .order('created_at', { ascending: true })
+      .limit(30)
+
+    for (const m of (msgs || [])) {
+      push({
+        key:       `msg-${m.id}`,
+        type:      'message',
+        title:     role === 'manager' ? '💬 Nouveau message' : '💬 Message du manager',
+        body:      apercuMessageNotif(m),
+        link:      role === 'manager' ? '/manager/messages' : '/ouvrier/messages',
+        createdAt: m.created_at,
+        silent:    true,        // sync silencieuse : pas de vibration/son
+      })
+    }
+
+    // 2) Manager : devis en attente de validation
+    if (role === 'manager' && entreprise?.id) {
+      const { data: devisAtt } = await supabase
+        .from('devis')
+        .select('id, numero, created_at')
+        .eq('entreprise_id', entreprise.id)
+        .eq('statut', 'en_attente_validation')
+        .order('created_at', { ascending: true })
+        .limit(20)
+      for (const d of (devisAtt || [])) {
+        push({
+          key:       `devis-att-${d.id}`,
+          type:      'devis_a_valider',
+          title:     '📋 Devis à valider',
+          body:      `Devis ${d.numero || ''} en attente de votre validation.`,
+          link:      '/manager/devis',
+          createdAt: d.created_at,
+          silent:    true,
+        })
+      }
+    }
+  }, [profile?.id, profile?.role, entreprise?.id, push])
+
+  useEffect(() => {
+    if (!isAuthenticated || !profile?.id) return
+    syncFromDb()
+    const onVisible = () => { if (!document.hidden) syncFromDb() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [isAuthenticated, profile?.id, syncFromDb])
 
   // Supabase Realtime — écoute les événements métier de l'entreprise
   useEffect(() => {
@@ -129,12 +197,10 @@ export function NotificationsProvider({ children }) {
           }
         )
         .on('postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'messages', filter: `entreprise_id=eq.${entrepriseId}` },
+          { event: 'INSERT', schema: 'public', table: 'messages', filter: `destinataire_id=eq.${profile.id}` },
           ({ new: n }) => {
-            if (n?.expediteur_id !== profile.id) {
-              push({ type: 'message', title: '💬 Nouveau message',
-                body: apercuMessageNotif(n) || 'Un ouvrier vous a envoyé un message.', link: '/manager/messages' })
-            }
+            push({ key: `msg-${n.id}`, type: 'message', title: '💬 Nouveau message',
+              body: apercuMessageNotif(n) || 'Un ouvrier vous a envoyé un message.', link: '/manager/messages' })
           }
         )
     }
@@ -148,7 +214,7 @@ export function NotificationsProvider({ children }) {
         )
         .on('postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'messages', filter: `destinataire_id=eq.${profile.id}` },
-          ({ new: n }) => push({ type: 'message', title: '💬 Message du manager',
+          ({ new: n }) => push({ key: `msg-${n.id}`, type: 'message', title: '💬 Message du manager',
             body: apercuMessageNotif(n) || 'Vous avez reçu un message.', link: '/ouvrier/messages' })
         )
         .on('postgres_changes',
