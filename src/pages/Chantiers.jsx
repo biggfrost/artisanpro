@@ -1,5 +1,5 @@
-﻿import { useState, useMemo } from 'react'
-import { useLocation } from 'react-router-dom'
+﻿import { useState, useMemo, useEffect, useCallback } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   Plus, Pencil, Trash2, HardHat,
   CalendarDays, User, FileText, CheckCircle2, AlertTriangle, Link2,
@@ -16,6 +16,9 @@ import CountdownButton from '../components/CountdownButton'
 import { usePullToRefresh } from '../hooks/usePullToRefresh'
 import PullToRefreshIndicator from '../components/PullToRefreshIndicator'
 import { formatDate } from '../utils/formatters'
+import { useToast } from '../contexts/ToastContext'
+import { listDevisAuthenticated, normalizeDevis } from '../services/devisService'
+import { acceptedDevisNumeros, isChantierLegitime, extractDevisNumero } from '../utils/chantierLogic'
 
 const FILTERS = [
   { value: 'tous',     label: 'Tous'       },
@@ -27,12 +30,23 @@ const FILTERS = [
 export default function Chantiers() {
   const { chantiers, loading, addChantier, updateChantier, deleteChantier, refresh } = useChantiers()
   const location = useLocation()
+  const navigate = useNavigate()
   const pullState = usePullToRefresh(refresh)
+  const toast = useToast()
+
+  // Charge les devis pour savoir lesquels sont acceptés → valide les chantiers
+  const [acceptedNums, setAcceptedNums] = useState(() => new Set())
+  const fetchAccepted = useCallback(async () => {
+    const { data } = await listDevisAuthenticated()
+    setAcceptedNums(acceptedDevisNumeros((data || []).map(normalizeDevis)))
+  }, [])
+  useEffect(() => { fetchAccepted() }, [fetchAccepted])
   const [search, setSearch]           = useState('')
   const [filter, setFilter]           = useState(() => location.state?.filter ?? 'tous')
   const [modalOpen, setModalOpen]     = useState(false)
   const [editing, setEditing]         = useState(null)
   const [deleteTarget, setDeleteTarget] = useState(null)
+  const [blockedChantier, setBlockedChantier] = useState(null) // chantier dont le démarrage est bloqué
 
   const filtered = useMemo(() => {
     const q = (search || '').toLowerCase()
@@ -92,6 +106,14 @@ export default function Chantiers() {
     if (c.statut === 'planifie')      next = 'en_cours'
     else if (c.statut === 'en_cours') next = 'termine'
     else                              next = 'en_cours'   // termine ou annule → relance
+
+    // ⚠️ RÈGLE MÉTIER : un chantier ne peut passer "en cours" ou "terminé"
+    // que si son devis d'origine a été ACCEPTÉ (signé par le client).
+    if ((next === 'en_cours' || next === 'termine') && !isChantierLegitime(c, acceptedNums)) {
+      setBlockedChantier(c)
+      return
+    }
+
     updateChantier(c.id, { statut: next })
   }
 
@@ -158,6 +180,8 @@ export default function Chantiers() {
             <ChantierCard
               key={c.id}
               chantier={c}
+              legitime={isChantierLegitime(c, acceptedNums)}
+              devisNumero={extractDevisNumero(c)}
               onEdit={() => openEdit(c)}
               onDelete={() => setDeleteTarget(c.id)}
               onToggle={() => toggleStatut(c)}
@@ -177,6 +201,41 @@ export default function Chantiers() {
           onSubmit={handleSubmit}
           onCancel={closeModal}
         />
+      </Modal>
+
+      {/* Blocage : démarrage d'un chantier sans devis signé */}
+      <Modal
+        isOpen={!!blockedChantier}
+        onClose={() => setBlockedChantier(null)}
+        title="Devis signé requis"
+      >
+        <div className="flex gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4">
+          <AlertTriangle size={18} className="text-amber-600 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-amber-900 leading-relaxed">
+            Ce chantier ne peut pas démarrer car <strong>aucun devis signé</strong> ne lui
+            est associé. Un chantier ne peut être actif que si le client a accepté et signé
+            le devis correspondant.
+          </p>
+        </div>
+        <p className="text-xs text-slate-500 mb-5 leading-relaxed">
+          <strong className="text-slate-700">Marche à suivre :</strong> envoyez le devis pour
+          signature électronique depuis l'onglet <strong>Devis</strong>. Dès que le client le
+          signe, le chantier sera automatiquement créé et pourra être démarré.
+        </p>
+        <div className="flex gap-3">
+          <button
+            onClick={() => setBlockedChantier(null)}
+            className="flex-1 px-4 py-3 rounded-xl border border-slate-200 text-slate-700 font-medium text-sm hover:bg-slate-50 transition-colors"
+          >
+            Compris
+          </button>
+          <button
+            onClick={() => { setBlockedChantier(null); navigate('/manager/devis') }}
+            className="flex-1 px-4 py-3 rounded-xl bg-primary-900 text-white font-semibold text-sm hover:bg-primary-800 transition-colors"
+          >
+            Aller aux devis
+          </button>
+        </div>
       </Modal>
 
       {/* Delete confirm avec compte à rebours anti-clic accidentel */}
@@ -216,31 +275,27 @@ export default function Chantiers() {
   )
 }
 
-// Détecte si un chantier est lié à un devis signé (notes générées par chantierFromDevis)
-function isLinkedToDevis(chantier) {
-  return chantier.notes?.includes('Issu du devis') || false
-}
-
-function ChantierCard({ chantier, onEdit, onDelete, onToggle }) {
-  const linkedToDevis = isLinkedToDevis(chantier)
-  const isOrphan = !linkedToDevis // chantier créé sans devis signé associé
+function ChantierCard({ chantier, legitime, devisNumero, onEdit, onDelete, onToggle }) {
+  const isOrphan = !legitime // chantier sans devis accepté → incohérent
 
   return (
-    <div className={`bg-white rounded-2xl p-4 shadow-card border ${isOrphan ? 'border-amber-200' : 'border-slate-100'}`}>
-      {/* Bandeau orphelin */}
+    <div className={`bg-white rounded-2xl p-4 shadow-card border ${isOrphan ? 'border-amber-300' : 'border-slate-100'}`}>
+      {/* Bandeau incohérence : devis non signé */}
       {isOrphan && (
-        <div className="flex items-center gap-1.5 bg-amber-50 rounded-xl px-2.5 py-1.5 mb-3 -mt-0.5">
-          <AlertTriangle size={12} className="text-amber-500 flex-shrink-0" />
-          <p className="text-[11px] text-amber-700 font-medium">
-            Aucun devis signé associé — ce chantier a été créé manuellement
+        <div className="flex items-start gap-1.5 bg-amber-50 rounded-xl px-2.5 py-2 mb-3 -mt-0.5">
+          <AlertTriangle size={13} className="text-amber-600 flex-shrink-0 mt-0.5" />
+          <p className="text-[11px] text-amber-800 font-medium leading-snug">
+            {devisNumero
+              ? <>Devis <strong>{devisNumero}</strong> non signé par le client — ce chantier ne devrait pas être actif.</>
+              : <>Aucun devis signé associé — ce chantier est hors process.</>}
           </p>
         </div>
       )}
-      {linkedToDevis && (
+      {legitime && (
         <div className="flex items-center gap-1.5 bg-emerald-50 rounded-xl px-2.5 py-1.5 mb-3 -mt-0.5">
           <Link2 size={12} className="text-emerald-600 flex-shrink-0" />
           <p className="text-[11px] text-emerald-700 font-medium">
-            {chantier.notes?.match(/Issu du devis ([^\s]+)/)?.[1] && `Devis ${chantier.notes.match(/Issu du devis ([^\s]+)/)[1]} signé`}
+            Devis {devisNumero} signé par le client ✓
           </p>
         </div>
       )}

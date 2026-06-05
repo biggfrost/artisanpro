@@ -111,9 +111,10 @@ export default function DashboardPro() {
     }
     const maxMonthly = Math.max(...monthly.map((m) => m.value), 1)
 
-    // Stats chantiers
-    const chantiersEnCours   = chantiers.filter((c) => c.statut === 'en_cours').length
-    const chantiersTermines  = chantiers.filter((c) => c.statut === 'termine').length
+    // Stats chantiers — seuls les chantiers issus d'un devis signé sont légitimes
+    const estLegitime = (c) => c.notes?.includes('Issu du devis')
+    const chantiersEnCours   = chantiers.filter((c) => c.statut === 'en_cours' && estLegitime(c)).length
+    const chantiersTermines  = chantiers.filter((c) => c.statut === 'termine'  && estLegitime(c)).length
     const chantiersPlanifies = chantiers.filter((c) => c.statut === 'planifie').length
 
     // Ouvriers actifs = ceux qui ont une assignation récente
