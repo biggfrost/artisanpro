@@ -1,8 +1,9 @@
-import { useMemo, useEffect, useCallback } from 'react'
+import { useMemo, useEffect, useCallback, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   FileText, CheckCircle, HardHat, Bell,
   TrendingUp, ChevronRight, BarChart3, ArrowUpRight, Settings, UserCircle2,
+  AlertTriangle,
 } from 'lucide-react'
 import { useDevis } from '../hooks/useDevis'
 import { useChantiers } from '../hooks/useChantiers'
@@ -11,65 +12,91 @@ import Badge from '../components/Badge'
 import { formatDate, formatCurrency, formatDateRelative } from '../utils/formatters'
 import { loadParametres } from '../services/parametres'
 import { supabase } from '../services/supabase'
+import { listDevisAuthenticated, normalizeDevis } from '../services/devisService'
+import { mergeDevis } from '../utils/mergeDevis'
+import { acceptedDevisNumeros, isChantierLegitime } from '../utils/chantierLogic'
 import { useAuth } from '../contexts/AuthContext'
 
 export default function Dashboard() {
   const { devis }               = useDevis()
   const { chantiers, refresh: refreshChantiers } = useChantiers()
-  const navigate = useNavigate()
-  const artisan  = useMemo(loadParametres, [])
-  const prenom   = artisan.nom?.split(' ')[0] || artisan.raisonSociale || ''
-  const { entreprise } = useAuth()
+  const navigate                = useNavigate()
+  const artisan                 = useMemo(loadParametres, [])
+  const prenom                  = artisan.nom?.split(' ')[0] || artisan.raisonSociale || ''
+  const { entreprise }          = useAuth()
 
-  // Temps réel — les KPIs se mettent à jour automatiquement
+  // ── Devis Supabase pour le CA réel ────────────────────────────────
+  const [supabaseDevis, setSupabaseDevis] = useState([])
+  const fetchDevis = useCallback(async () => {
+    const { data } = await listDevisAuthenticated()
+    setSupabaseDevis(data.map(normalizeDevis))
+  }, [])
+
+  useEffect(() => { fetchDevis() }, [fetchDevis])
+
+  // Tous les devis (local + Supabase, dédupliqués, statut le plus avancé gagne)
+  const allDevis = useMemo(() => mergeDevis(devis, supabaseDevis), [devis, supabaseDevis])
+
+  // Temps réel
   const handleRealtimeChange = useCallback(() => {
     refreshChantiers?.()
-  }, [refreshChantiers])
+    fetchDevis()
+  }, [refreshChantiers, fetchDevis])
 
   useEffect(() => {
     if (!entreprise?.id) return
     const channel = supabase
       .channel(`dashboard-${entreprise.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'devis', filter: `entreprise_id=eq.${entreprise.id}` }, handleRealtimeChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'devis',    filter: `entreprise_id=eq.${entreprise.id}` }, handleRealtimeChange)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'chantiers', filter: `entreprise_id=eq.${entreprise.id}` }, handleRealtimeChange)
       .subscribe()
     return () => supabase.removeChannel(channel)
   }, [entreprise?.id, handleRealtimeChange])
 
   const stats = useMemo(() => {
-    const enAttente = devis.filter((d) => d.statut === 'envoye').length
-    const acceptes  = devis.filter((d) => d.statut === 'accepte').length
-    const enCours   = chantiers.filter((c) => c.statut === 'en_cours').length
+    const enAttente = allDevis.filter((d) => d.statut === 'envoye').length
+    const acceptes  = allDevis.filter((d) => d.statut === 'accepte').length
+
+    // Croise réellement chantier ↔ devis : un chantier est légitime SSI son
+    // devis d'origine est accepté (signé). Ne se fie PAS aux notes seules.
+    const acceptes_nums = acceptedDevisNumeros(allDevis)
+    const estLegitime = (c) => isChantierLegitime(c, acceptes_nums)
+
+    // "Chantiers en cours" ne compte QUE les chantiers légitimes (devis signé).
+    const enCours = chantiers.filter((c) => c.statut === 'en_cours' && estLegitime(c)).length
 
     const sevenDaysAgo = new Date()
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
-    const relances = devis.filter((d) => {
+    const relances = allDevis.filter((d) => {
       if (d.statut !== 'envoye') return false
-      return new Date(d.date) < sevenDaysAgo
+      return new Date(d.date || d.dateEmission || 0) < sevenDaysAgo
     }).length
 
     const monthStart = new Date()
     monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0)
-    const caMois = devis
+
+    // CA = uniquement devis signés électroniquement (statut accepte)
+    const caMois = allDevis
       .filter((d) => d.statut === 'accepte' && new Date(d.dateEmission || d.date || 0) >= monthStart)
       .reduce((sum, d) => sum + Number(d.totalHT ?? d.montantHT ?? 0), 0)
 
-    const totalAccepte = devis
-      .filter((d) => d.statut === 'accepte')
-      .reduce((sum, d) => sum + Number(d.totalHT ?? d.montantHT ?? 0), 0)
+    // Chantiers orphelins (actifs/terminés sans devis signé) → à régulariser
+    const chantiersOrphelins = chantiers.filter(
+      (c) => ['en_cours', 'termine'].includes(c.statut) && !estLegitime(c)
+    )
 
-    return { enAttente, acceptes, enCours, relances, caMois, totalAccepte }
-  }, [devis, chantiers])
+    return { enAttente, acceptes, enCours, relances, caMois, chantiersOrphelins }
+  }, [allDevis, chantiers])
 
   const recentActivity = useMemo(() => {
     const items = [
-      ...devis.map((d) => ({ ...d, _type: 'devis' })),
+      ...allDevis.map((d) => ({ ...d, _type: 'devis' })),
       ...chantiers.map((c) => ({ ...c, _type: 'chantier' })),
     ]
     return items
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
       .slice(0, 5)
-  }, [devis, chantiers])
+  }, [allDevis, chantiers])
 
   return (
     <div className="px-4 pt-12 pb-4">
@@ -80,6 +107,24 @@ export default function Dashboard() {
         </p>
         <h1 className="text-2xl font-bold text-primary-900">ArtisanPro</h1>
       </div>
+
+      {/* ⚠️ Avertissement chantiers sans devis signé */}
+      {stats.chantiersOrphelins.length > 0 && (
+        <button
+          onClick={() => navigate('/manager/chantiers')}
+          className="w-full flex items-start gap-3 bg-amber-50 border border-amber-300 rounded-2xl px-4 py-3 mb-4 text-left active:scale-[0.99] transition-transform"
+        >
+          <AlertTriangle size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-bold text-amber-900">
+              {stats.chantiersOrphelins.length} chantier{stats.chantiersOrphelins.length > 1 ? 's' : ''} sans devis signé
+            </p>
+            <p className="text-xs text-amber-700 mt-0.5">
+              Un chantier ne peut être "en cours" ou "terminé" que si le client a signé le devis correspondant.
+            </p>
+          </div>
+        </button>
+      )}
 
       {/* Bannière Tableau de bord Pro */}
       <button
@@ -107,10 +152,10 @@ export default function Dashboard() {
 
       {/* Stats Grid */}
       <div className="grid grid-cols-2 gap-3 mb-6">
-        <StatCard icon={FileText}     label="Devis en attente"  value={stats.enAttente} iconColor="text-blue-600"   iconBg="bg-blue-50"   onClick={() => navigate('/manager/devis',    { state: { filter: 'envoye'   } })} />
-        <StatCard icon={CheckCircle}  label="Devis acceptés"    value={stats.acceptes}  iconColor="text-emerald-600" iconBg="bg-emerald-50" onClick={() => navigate('/manager/devis',    { state: { filter: 'accepte'  } })} />
-        <StatCard icon={HardHat}      label="Chantiers en cours" value={stats.enCours}  iconColor="text-accent-500" iconBg="bg-orange-50"  onClick={() => navigate('/manager/chantiers',{ state: { filter: 'en_cours' } })} />
-        <StatCard icon={Bell}         label="Relances à faire"   value={stats.relances} iconColor="text-red-500"    iconBg="bg-red-50"    onClick={() => navigate('/manager/devis',    { state: { filter: 'relance'  } })} />
+        <StatCard icon={FileText}    label="Devis en attente"  value={stats.enAttente} iconColor="text-blue-600"    iconBg="bg-blue-50"   onClick={() => navigate('/manager/devis',     { state: { filter: 'envoye'   } })} />
+        <StatCard icon={CheckCircle} label="Devis acceptés"    value={stats.acceptes}  iconColor="text-emerald-600" iconBg="bg-emerald-50" onClick={() => navigate('/manager/devis',     { state: { filter: 'accepte'  } })} />
+        <StatCard icon={HardHat}     label="Chantiers en cours" value={stats.enCours}  iconColor="text-accent-500"  iconBg="bg-orange-50"  onClick={() => navigate('/manager/chantiers', { state: { filter: 'en_cours' } })} />
+        <StatCard icon={Bell}        label="Relances à faire"   value={stats.relances} iconColor="text-red-500"     iconBg="bg-red-50"     onClick={() => navigate('/manager/devis',     { state: { filter: 'relance'  } })} />
       </div>
 
       {/* Quick actions */}
@@ -179,9 +224,7 @@ function ActivityItem({ item }) {
   const isDevis = item._type === 'devis'
   return (
     <div className="bg-white rounded-2xl p-3.5 shadow-card border border-slate-100 flex items-center gap-3">
-      <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
-        isDevis ? 'bg-blue-50' : 'bg-orange-50'
-      }`}>
+      <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${isDevis ? 'bg-blue-50' : 'bg-orange-50'}`}>
         {isDevis ? <FileText size={15} className="text-blue-600" /> : <HardHat size={15} className="text-accent-500" />}
       </div>
       <div className="flex-1 min-w-0">
