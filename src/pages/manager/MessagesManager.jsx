@@ -1,16 +1,18 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
-  Search, MessageCircle, ChevronLeft, ChevronRight, Send, Loader2,
+  Search, MessageCircle, ChevronLeft, ChevronRight, Loader2,
   AlertCircle,
 } from 'lucide-react'
 import { useAuth } from '../../contexts/AuthContext'
 import {
   listConversationsForManager, listMessagesAvec, envoyerMessage,
-  marquerMessageLu,
+  marquerMessageLu, apercuMessage,
 } from '../../services/mesMessagesService'
 import { supabase } from '../../services/supabase'
 import { SkeletonRowList } from '../../components/Skeleton'
+import ChatComposer from '../../components/ChatComposer'
+import MessageMedia from '../../components/MessageMedia'
 
 // Realtime fait le gros du job ; polling moins agressif en secours.
 const POLL_INTERVAL = 25000
@@ -166,7 +168,7 @@ function ConversationItem({ conv, onClick }) {
         </div>
         {lastMessage ? (
           <p className={`text-xs truncate mt-0.5 ${unreadCount > 0 ? 'text-slate-700' : 'text-slate-500'}`}>
-            {lastMessage.contenu}
+            {apercuMessage(lastMessage)}
           </p>
         ) : (
           <p className="text-xs text-slate-400 italic mt-0.5">
@@ -186,9 +188,7 @@ function ChatView({ ouvrierId }) {
   const [ouvrier,  setOuvrier]  = useState(null)
   const [messages, setMessages] = useState([])
   const [loading,  setLoading]  = useState(true)
-  const [sending,  setSending]  = useState(false)
   const [error,    setError]    = useState(null)
-  const [text,     setText]     = useState('')
   const scrollRef = useRef(null)
   const wasAtBottomRef = useRef(true)
 
@@ -268,15 +268,12 @@ function ChatView({ ouvrierId }) {
     wasAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
   }
 
-  async function handleSend(e) {
-    e.preventDefault()
-    if (!text.trim() || sending) return
-    setSending(true)
+  // Envoi texte OU média (appelé par ChatComposer)
+  async function handleSend(contenu, media) {
     wasAtBottomRef.current = true
-    const { data, error: e2 } = await envoyerMessage(ouvrierId, text.trim())
-    setSending(false)
+    const { data, error: e2 } = await envoyerMessage(ouvrierId, contenu, media)
     if (e2) { setError(e2.message); return }
-    if (data) { setMessages((prev) => [...prev, data]); setText('') }
+    if (data) setMessages((prev) => [...prev, data])
   }
 
   const initials = ouvrier
@@ -336,13 +333,18 @@ function ChatView({ ouvrierId }) {
                   </div>
                 )}
                 <div className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[80%] rounded-2xl px-3.5 py-2 ${
+                  <div className={`max-w-[80%] rounded-2xl px-2 py-1.5 ${
                     isMe
                       ? 'bg-primary-900 text-white rounded-br-sm'
                       : 'bg-white border border-slate-200 text-slate-800 rounded-bl-sm'
                   }`}>
-                    <p className="text-sm whitespace-pre-wrap break-words">{m.contenu}</p>
-                    <p className={`text-[10px] mt-0.5 ${isMe ? 'text-blue-200' : 'text-slate-400'}`}>
+                    {m.type && m.type !== 'texte' && (
+                      <div className="px-1 pt-0.5"><MessageMedia message={m} isMe={isMe} /></div>
+                    )}
+                    {m.contenu && (
+                      <p className="text-sm whitespace-pre-wrap break-words px-1.5 pt-0.5">{m.contenu}</p>
+                    )}
+                    <p className={`text-[10px] mt-0.5 px-1.5 pb-0.5 ${isMe ? 'text-blue-200' : 'text-slate-400'}`}>
                       {fmtTime(m.created_at)}
                       {isMe && m.lu && ' · vu'}
                     </p>
@@ -354,25 +356,13 @@ function ChatView({ ouvrierId }) {
         )}
       </div>
 
-      {/* Input */}
-      <form onSubmit={handleSend} className="bg-white border-t border-slate-100 px-3 py-2.5 flex items-end gap-2 sticky bottom-0">
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e) }
-          }}
-          placeholder={ouvrier ? `Écrire à ${ouvrier.prenom || 'ouvrier'}…` : 'Chargement…'}
-          rows={1}
-          disabled={!ouvrier || sending}
-          className="flex-1 px-3.5 py-2.5 rounded-2xl border border-slate-200 text-sm bg-slate-50 outline-none focus:border-primary-700 focus:bg-white focus:ring-2 focus:ring-primary-900/10 resize-none max-h-32"
-          style={{ minHeight: 42 }}
-        />
-        <button type="submit" disabled={!text.trim() || sending || !ouvrier}
-          className="w-11 h-11 rounded-2xl bg-primary-900 hover:bg-primary-800 text-white flex items-center justify-center shadow-sm disabled:opacity-40 active:scale-95 transition-all flex-shrink-0">
-          {sending ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
-        </button>
-      </form>
+      {/* Composer : texte + photo/vidéo/document + message vocal */}
+      <ChatComposer
+        onSend={handleSend}
+        disabled={!ouvrier}
+        placeholder={ouvrier ? `Écrire à ${ouvrier.prenom || 'ouvrier'}…` : 'Chargement…'}
+        accent="primary"
+      />
     </div>
   )
 }

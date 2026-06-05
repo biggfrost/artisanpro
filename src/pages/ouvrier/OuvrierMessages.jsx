@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import {
-  Send, Loader2, MessageCircle, Building2, AlertCircle,
+  Loader2, MessageCircle, Building2, AlertCircle,
 } from 'lucide-react'
 import { useMesMessages } from '../../hooks/useMesMessages'
 import { useAuth } from '../../contexts/AuthContext'
+import ChatComposer from '../../components/ChatComposer'
+import MessageMedia from '../../components/MessageMedia'
 
 function fmtTime(iso) {
   return new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
@@ -17,8 +19,7 @@ function sameDay(a, b) {
 
 export default function OuvrierMessages() {
   const { user } = useAuth()
-  const { interlocuteur, messages, loading, sending, error, envoyer } = useMesMessages()
-  const [text, setText] = useState('')
+  const { interlocuteur, messages, loading, error, envoyer } = useMesMessages()
   const scrollRef = useRef(null)
   const wasAtBottomRef = useRef(true)
 
@@ -39,12 +40,10 @@ export default function OuvrierMessages() {
     wasAtBottomRef.current = atBottom
   }
 
-  async function handleSend(e) {
-    e.preventDefault()
-    if (!text.trim() || sending) return
+  // Envoi texte OU média (appelé par ChatComposer)
+  async function handleSend(contenu, media) {
     wasAtBottomRef.current = true
-    const { error } = await envoyer(text)
-    if (!error) setText('')
+    await envoyer(contenu, media)
   }
 
   // Header avec interlocuteur
@@ -104,13 +103,18 @@ export default function OuvrierMessages() {
                   </div>
                 )}
                 <div className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[80%] rounded-2xl px-3.5 py-2 ${
+                  <div className={`max-w-[80%] rounded-2xl px-2 py-1.5 ${
                     isMe
                       ? 'bg-accent-500 text-white rounded-br-sm'
                       : 'bg-white border border-slate-200 text-slate-800 rounded-bl-sm'
                   }`}>
-                    <p className="text-sm whitespace-pre-wrap break-words">{m.contenu}</p>
-                    <p className={`text-[10px] mt-0.5 ${isMe ? 'text-orange-100' : 'text-slate-400'}`}>
+                    {m.type && m.type !== 'texte' && (
+                      <div className="px-1 pt-0.5"><MessageMedia message={m} isMe={isMe} /></div>
+                    )}
+                    {m.contenu && (
+                      <p className="text-sm whitespace-pre-wrap break-words px-1.5 pt-0.5">{m.contenu}</p>
+                    )}
+                    <p className={`text-[10px] mt-0.5 px-1.5 pb-0.5 ${isMe ? 'text-orange-100' : 'text-slate-400'}`}>
                       {fmtTime(m.created_at)}
                       {isMe && m.lu && ' · vu'}
                     </p>
@@ -122,28 +126,13 @@ export default function OuvrierMessages() {
         )}
       </div>
 
-      {/* Input sticky bottom */}
-      <form onSubmit={handleSend} className="bg-white border-t border-slate-100 px-3 py-2.5 flex items-end gap-2 sticky bottom-0">
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              handleSend(e)
-            }
-          }}
-          placeholder={interlocuteur ? `Écrire à ${interlocuteur.prenom || 'manager'}…` : 'Chargement…'}
-          rows={1}
-          disabled={!interlocuteur || sending}
-          className="flex-1 px-3.5 py-2.5 rounded-2xl border border-slate-200 text-sm bg-slate-50 outline-none focus:border-accent-500 focus:bg-white focus:ring-2 focus:ring-accent-500/15 resize-none max-h-32"
-          style={{ minHeight: 42 }}
-        />
-        <button type="submit" disabled={!text.trim() || sending || !interlocuteur}
-          className="w-11 h-11 rounded-2xl bg-accent-500 hover:bg-accent-600 text-white flex items-center justify-center shadow-sm disabled:opacity-40 active:scale-95 transition-all flex-shrink-0">
-          {sending ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
-        </button>
-      </form>
+      {/* Composer : texte + photo/vidéo/document + message vocal */}
+      <ChatComposer
+        onSend={handleSend}
+        disabled={!interlocuteur}
+        placeholder={interlocuteur ? `Écrire à ${interlocuteur.prenom || 'manager'}…` : 'Chargement…'}
+        accent="accent"
+      />
     </div>
   )
 }

@@ -8,6 +8,18 @@ const NotificationsContext = createContext(null)
 const MAX_NOTIFS = 100
 const canNotify  = typeof window !== 'undefined' && 'Notification' in window
 
+// Aperçu d'un message pour les notifications (gère les médias)
+function apercuMessageNotif(m) {
+  if (!m) return ''
+  switch (m.type) {
+    case 'image':    return '📷 Photo'
+    case 'video':    return '🎥 Vidéo'
+    case 'audio':    return '🎤 Message vocal'
+    case 'document': return `📎 ${m.media_nom || 'Document'}`
+    default:         return (m.contenu || '').slice(0, 80)
+  }
+}
+
 export function NotificationsProvider({ children }) {
   const { isAuthenticated, profile, entreprise } = useAuth()
   const [notifications, setNotifications] = useState(() => {
@@ -118,7 +130,7 @@ export function NotificationsProvider({ children }) {
           ({ new: n }) => {
             if (n?.expediteur_id !== profile.id) {
               push({ type: 'message', title: '💬 Nouveau message',
-                body: n?.contenu?.slice(0, 80) || 'Un ouvrier vous a envoyé un message.', link: '/manager/messages' })
+                body: apercuMessageNotif(n) || 'Un ouvrier vous a envoyé un message.', link: '/manager/messages' })
             }
           }
         )
@@ -134,7 +146,7 @@ export function NotificationsProvider({ children }) {
         .on('postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'messages', filter: `destinataire_id=eq.${profile.id}` },
           ({ new: n }) => push({ type: 'message', title: '💬 Message du manager',
-            body: n?.contenu?.slice(0, 80) || 'Vous avez reçu un message.', link: '/ouvrier/messages' })
+            body: apercuMessageNotif(n) || 'Vous avez reçu un message.', link: '/ouvrier/messages' })
         )
         .on('postgres_changes',
           { event: 'UPDATE', schema: 'public', table: 'devis', filter: `cree_par=eq.${profile.id}` },

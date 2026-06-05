@@ -93,10 +93,12 @@ export function useMesMessages() {
     return () => { cancelled = true }
   }, [messages])
 
-  async function envoyer(contenu) {
-    if (!interlocuteur?.id || !contenu.trim()) return { error: { message: 'Message vide' } }
+  // Envoie un texte et/ou un média. `media` = { type, url, nom, taille, duree }
+  async function envoyer(contenu, media = null) {
+    if (!interlocuteur?.id) return { error: { message: 'Aucun destinataire' } }
+    if (!media && !(contenu || '').trim()) return { error: { message: 'Message vide' } }
     setSending(true)
-    const { data, error } = await envoyerMessage(interlocuteur.id, contenu.trim())
+    const { data, error } = await envoyerMessage(interlocuteur.id, (contenu || '').trim(), media)
     setSending(false)
     if (data) setMessages((prev) => [...prev, data])
     return { data, error }

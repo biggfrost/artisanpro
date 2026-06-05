@@ -26,19 +26,42 @@ export async function listMessagesAvec(interlocuteurId) {
   return { data: data ?? [], error }
 }
 
-export async function envoyerMessage(destinataireId, contenu) {
+// Envoie un message. `media` optionnel : { type, url, nom, taille, duree }
+export async function envoyerMessage(destinataireId, contenu, media = null) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { data: null, error: { message: 'Non authentifié' } }
+
+  const payload = {
+    expediteur_id:   user.id,
+    destinataire_id: destinataireId,
+    contenu:         contenu || '',
+  }
+  if (media) {
+    payload.type         = media.type
+    payload.media_url    = media.url
+    payload.media_nom    = media.nom || null
+    payload.media_taille = media.taille || null
+    if (media.duree != null) payload.media_duree = media.duree
+  }
+
   const { data, error } = await supabase
     .from('messages')
-    .insert({
-      expediteur_id:   user.id,
-      destinataire_id: destinataireId,
-      contenu,
-    })
+    .insert(payload)
     .select()
     .single()
   return { data, error }
+}
+
+// Aperçu textuel d'un message pour la liste des conversations
+export function apercuMessage(m) {
+  if (!m) return ''
+  switch (m.type) {
+    case 'image':    return '📷 Photo'
+    case 'video':    return '🎥 Vidéo'
+    case 'audio':    return '🎤 Message vocal'
+    case 'document': return `📎 ${m.media_nom || 'Document'}`
+    default:         return m.contenu || ''
+  }
 }
 
 export async function marquerMessageLu(messageId) {
