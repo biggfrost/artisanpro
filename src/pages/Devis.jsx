@@ -5,6 +5,7 @@ import {
   FileText, FileDown, Download, Mail, AlertCircle, Loader2, PenLine, Copy, Check,
   Lock, Files, Shield, CheckCircle, Share2, Clock, ThumbsUp, ThumbsDown,
   Eye, Pencil, X, MapPin, Euro, Calendar as CalIcon,
+  MessageCircle, MessageSquare,
 } from 'lucide-react'
 import { todayISO } from '../utils/formatters'
 import { useDevis } from '../hooks/useDevis'
@@ -24,7 +25,7 @@ import { chantierFromDevis, createChantier, chantierExisteDejaPourDevis } from '
 import { findOrCreateClient } from '../services/clientsService'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../contexts/ToastContext'
-import { shareDevis } from '../utils/share'
+import { shareDevis, shareSigningLink } from '../utils/share'
 import { mergeDevis } from '../utils/mergeDevis'
 import { haptic } from '../utils/haptics'
 import { exportDevisCSV } from '../services/exportCsv'
@@ -556,7 +557,40 @@ NOTIFY pgrst, 'reload schema';`}</pre>
               </button>
             </div>
 
-            <div className="flex gap-3">
+            {/* Partage natif : WhatsApp, SMS, email, Messenger… */}
+            <button
+              onClick={async () => {
+                haptic.light()
+                const res = await shareSigningLink(sigModal, artisan, sigResult.signingUrl)
+                if (res.method === 'clipboard') {
+                  toast.success('Lien copié — collez-le où vous voulez')
+                } else if (res.method === 'share') {
+                  toast.success('Lien partagé')
+                }
+              }}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl bg-primary-900 hover:bg-primary-800 text-white text-sm font-bold transition-colors active:scale-95"
+            >
+              <Share2 size={16} />
+              Partager le lien de signature
+            </button>
+            <p className="text-[11px] text-slate-400 text-center">
+              WhatsApp, SMS, email, Messenger… choisissez le canal de votre client
+            </p>
+
+            {/* Raccourcis directs complémentaires */}
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => {
+                  const text = encodeURIComponent(
+                    `Bonjour ${sigModal?.client || ''}, veuillez signer votre devis ${sigModal?.numero || ''} ici : ${sigResult.signingUrl}`
+                  )
+                  window.open(`https://wa.me/?text=${text}`, '_blank')
+                }}
+                className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-semibold border border-emerald-200 transition-colors"
+              >
+                <MessageCircle size={14} />
+                WhatsApp
+              </button>
               <button
                 onClick={() => {
                   const subject = encodeURIComponent(`Devis ${sigModal?.numero} — à signer`)
@@ -565,15 +599,35 @@ NOTIFY pgrst, 'reload schema';`}</pre>
                   )
                   window.open(`mailto:${sigModal?.clientEmail || ''}?subject=${subject}&body=${body}`, '_blank')
                 }}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-primary-900 text-white text-sm font-semibold"
+                className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold border border-blue-200 transition-colors"
               >
-                <Mail size={15} />
-                Envoyer par email
+                <Mail size={14} />
+                Email
               </button>
-              <button onClick={closeSigModal} className="flex-1 px-4 py-3 rounded-xl border border-slate-200 text-sm font-medium text-slate-700">
-                Fermer
+              <button
+                onClick={() => {
+                  const body = encodeURIComponent(
+                    `Bonjour ${sigModal?.client || ''}, signez votre devis ${sigModal?.numero || ''} : ${sigResult.signingUrl}`
+                  )
+                  window.open(`sms:${sigModal?.clientTelephone || ''}?body=${body}`, '_blank')
+                }}
+                className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-violet-50 hover:bg-violet-100 text-violet-700 text-xs font-semibold border border-violet-200 transition-colors"
+              >
+                <MessageSquare size={14} />
+                SMS
+              </button>
+              <button
+                onClick={handleCopyLink}
+                className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold border border-slate-200 transition-colors"
+              >
+                {copied ? <Check size={14} /> : <Copy size={14} />}
+                {copied ? 'Copié' : 'Copier'}
               </button>
             </div>
+
+            <button onClick={closeSigModal} className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+              Fermer
+            </button>
           </div>
         )}
       </Modal>
