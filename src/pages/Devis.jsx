@@ -1018,16 +1018,16 @@ function DevisCard({ devis, onDuplicate, onStatus, onDownload, onEmail, onSignat
         </div>
 
         <div className="flex items-center gap-1">
-          {/* Partage natif */}
-          {navigator.share && (
-            <button
-              onClick={() => shareDevis(devis, artisan, devis.tokenUnique ? `${window.location.origin}/signer/${devis.tokenUnique}` : null).then(() => haptic.light())}
-              title="Partager (WhatsApp, SMS, email…)"
-              className="w-8 h-8 rounded-xl flex items-center justify-center hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
-            >
-              <Share2 size={15} />
-            </button>
-          )}
+          {/* Partage (WhatsApp, SMS, email, Messenger…) — un seul bouton,
+              couvre tous les canaux. Remplace l'ancien bouton email isolé.
+              Toujours visible : fallback presse-papiers sur navigateur sans share natif. */}
+          <button
+            onClick={() => shareDevis(devis, artisan, devis.tokenUnique ? `${window.location.origin}/signer/${devis.tokenUnique}` : null).then(() => haptic.light())}
+            title="Partager (WhatsApp, SMS, email…)"
+            className="w-8 h-8 rounded-xl flex items-center justify-center hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+          >
+            <Share2 size={15} />
+          </button>
 
           {/* Send for signature */}
           <button
@@ -1050,16 +1050,6 @@ function DevisCard({ devis, onDuplicate, onStatus, onDownload, onEmail, onSignat
             className="w-8 h-8 rounded-xl flex items-center justify-center hover:bg-blue-50 text-slate-400 hover:text-primary-700 transition-colors disabled:opacity-50"
           >
             {downloading ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
-          </button>
-
-          {/* Send email */}
-          <button
-            onClick={handleEmail}
-            disabled={sending}
-            title="Envoyer par email"
-            className="w-8 h-8 rounded-xl flex items-center justify-center hover:bg-accent-50 text-slate-400 hover:text-accent-600 transition-colors disabled:opacity-50"
-          >
-            {sending ? <Loader2 size={15} className="animate-spin" /> : <Mail size={15} />}
           </button>
 
           {/* Verrou : indication visuelle que le devis est inaltérable */}
