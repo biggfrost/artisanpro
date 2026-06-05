@@ -315,7 +315,7 @@ export default function Devis() {
     setValidating((v) => ({ ...v, [d.id]: 'approve' }))
     haptic.success()
     if (d._source === 'supabase') {
-      await updateDevisStatut(d.id, 'envoye')
+      await updateDevisStatut(d.id, 'envoye', 'en_attente_validation')
       setSupabaseDevis((prev) => prev.map((x) => x.id === d.id ? { ...x, statut: 'envoye' } : x))
     } else {
       updateDevis(d.id, { statut: 'envoye' })
@@ -328,7 +328,7 @@ export default function Devis() {
     setValidating((v) => ({ ...v, [d.id]: 'refuse' }))
     haptic.warning()
     if (d._source === 'supabase') {
-      await updateDevisStatut(d.id, 'refuse')
+      await updateDevisStatut(d.id, 'refuse', 'en_attente_validation')
       setSupabaseDevis((prev) => prev.map((x) => x.id === d.id ? { ...x, statut: 'refuse' } : x))
     } else {
       updateDevis(d.id, { statut: 'refuse' })

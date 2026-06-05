@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { pushDevisSoumis, pushDevisStatut } from './pushTrigger'
 
 // Embed du créateur via la FK explicite devis_cree_par_fkey.
 // !left = LEFT JOIN : les devis sans cree_par (créés par le manager directement)
@@ -138,12 +139,24 @@ export async function createDevisComplet(devis) {
     .select(SELECT_WITH_CREATOR)
     .single()
 
+  // Notifie les managers : nouveau devis en attente de validation
+  if (data && !error) pushDevisSoumis(data)
+
   return { data: data ? normalizeDevis(data) : null, error }
 }
 
-export async function updateDevisStatut(id, statut) {
-  const { error } = await supabase.from('devis').update({ statut }).eq('id', id)
-  return { error }
+// `ancienStatut` optionnel → déclenche la bonne notification (validé/refusé/signé)
+export async function updateDevisStatut(id, statut, ancienStatut = null) {
+  const { data, error } = await supabase
+    .from('devis')
+    .update({ statut })
+    .eq('id', id)
+    .select('id, numero, statut, cree_par, entreprise_id')
+    .maybeSingle()
+
+  if (data && !error && ancienStatut) pushDevisStatut(data, ancienStatut)
+
+  return { error, data }
 }
 
 // Permet au manager de corriger un devis encore en_attente_validation

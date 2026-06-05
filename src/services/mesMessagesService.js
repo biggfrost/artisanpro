@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { pushNewMessage } from './pushTrigger'
 
 // Récupère l'un des managers de l'entreprise (pour démarrer une conversation
 // quand l'ouvrier n'a pas encore reçu de message).
@@ -49,6 +50,10 @@ export async function envoyerMessage(destinataireId, contenu, media = null) {
     .insert(payload)
     .select()
     .single()
+
+  // Déclenche la notification push au destinataire (best-effort)
+  if (data && !error) pushNewMessage(data)
+
   return { data, error }
 }
 
