@@ -135,11 +135,17 @@ async function buildNotifications(payload: any) {
 }
 
 async function sendToUsers(userIds: string[], notif: any) {
-  if (!userIds.length) return
-  const { data: subs } = await admin
+  if (!userIds.length) {
+    console.log('[notify] aucun destinataire pour:', notif.title)
+    return { subs: 0, sent: 0, errors: [] as string[] }
+  }
+  const { data: subs, error: subErr } = await admin
     .from('push_subscriptions')
     .select('*')
     .in('user_id', userIds)
+
+  if (subErr) console.log('[notify] erreur lecture push_subscriptions:', subErr.message)
+  console.log(`[notify] "${notif.title}" → ${userIds.length} user(s), ${subs?.length || 0} abonnement(s) trouvé(s)`)
 
   const payload = JSON.stringify({
     title: notif.title,
@@ -148,6 +154,9 @@ async function sendToUsers(userIds: string[], notif: any) {
     tag:   notif.tag,
   })
 
+  let sent = 0
+  const errors: string[] = []
+
   await Promise.all((subs || []).map(async (s) => {
     const subscription = {
       endpoint: s.endpoint,
@@ -155,25 +164,37 @@ async function sendToUsers(userIds: string[], notif: any) {
     }
     try {
       await webpush.sendNotification(subscription, payload)
+      sent++
     } catch (err: any) {
+      const code = err?.statusCode
+      errors.push(`${code}: ${err?.body || err?.message || 'err'}`)
+      console.log('[notify] échec push:', code, err?.body || err?.message)
       // Abonnement expiré / invalide → on le supprime
-      if (err?.statusCode === 404 || err?.statusCode === 410) {
+      if (code === 404 || code === 410) {
         await admin.from('push_subscriptions').delete().eq('endpoint', s.endpoint)
       }
     }
   }))
+
+  console.log(`[notify] "${notif.title}" → ${sent} push envoyé(s), ${errors.length} échec(s)`)
+  return { subs: subs?.length || 0, sent, errors }
 }
 
 // ── HTTP handler ───────────────────────────────────────────────────
 Deno.serve(async (req) => {
   try {
     const payload = await req.json()
+    console.log('[notify] reçu:', payload?.type, payload?.table)
     const notifs = await buildNotifications(payload)
-    for (const n of notifs) await sendToUsers(n.userIds, n)
-    return new Response(JSON.stringify({ ok: true, sent: notifs.length }), {
+    const results = []
+    for (const n of notifs) results.push(await sendToUsers(n.userIds, n))
+    const totalSent = results.reduce((s, r) => s + (r?.sent || 0), 0)
+    const totalSubs = results.reduce((s, r) => s + (r?.subs || 0), 0)
+    return new Response(JSON.stringify({ ok: true, rules: notifs.length, subscriptions: totalSubs, pushed: totalSent, results }), {
       headers: { 'Content-Type': 'application/json' },
     })
   } catch (e) {
+    console.log('[notify] ERREUR:', String(e))
     return new Response(JSON.stringify({ ok: false, error: String(e) }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
