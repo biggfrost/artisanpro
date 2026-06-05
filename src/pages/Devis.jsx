@@ -1008,6 +1008,25 @@ function DevisCard({ devis, onDuplicate, onStatus, onDownload, onEmail, onSignat
         </button>
       )}
 
+      {/* ── CTA proéminent : envoyer pour signature électronique ──────
+          Action clé du devis (convertit en CA). Mise en valeur sur fond
+          coloré avec libellé. Masquée si le devis est déjà signé/refusé. */}
+      {!['accepte', 'refuse', 'annule', 'en_attente_validation'].includes(devis.statut) && (
+        <button
+          onClick={onSignature}
+          className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-xl font-bold text-sm shadow-sm mb-3 active:scale-[0.98] transition-all ${
+            devis.tokenUnique
+              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
+              : 'bg-gradient-to-r from-violet-600 to-violet-500 text-white hover:from-violet-700 hover:to-violet-600'
+          }`}
+        >
+          <PenLine size={16} strokeWidth={2.5} />
+          {devis.tokenUnique
+            ? 'Relancer la signature électronique'
+            : 'Envoyer pour signature électronique'}
+        </button>
+      )}
+
       {/* Bottom */}
       <div className="flex items-end justify-between">
         <div>
@@ -1027,19 +1046,6 @@ function DevisCard({ devis, onDuplicate, onStatus, onDownload, onEmail, onSignat
             className="w-8 h-8 rounded-xl flex items-center justify-center hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
           >
             <Share2 size={15} />
-          </button>
-
-          {/* Send for signature */}
-          <button
-            onClick={onSignature}
-            title="Envoyer pour signature"
-            className={`w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${
-              devis.tokenUnique
-                ? 'text-emerald-500 hover:bg-emerald-50'
-                : 'text-slate-400 hover:bg-violet-50 hover:text-violet-600'
-            }`}
-          >
-            <PenLine size={15} />
           </button>
 
           {/* PDF download */}
