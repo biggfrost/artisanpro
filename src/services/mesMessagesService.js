@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import { pushNewMessage } from './pushTrigger'
+import { enqueue, isNetworkError } from './offlineQueue'
 
 // Récupère l'un des managers de l'entreprise (pour démarrer une conversation
 // quand l'ouvrier n'a pas encore reçu de message).
@@ -28,7 +29,8 @@ export async function listMessagesAvec(interlocuteurId) {
 }
 
 // Envoie un message. `media` optionnel : { type, url, nom, taille, duree }
-export async function envoyerMessage(destinataireId, contenu, media = null) {
+// `opts.noQueue` : utilisé par la synchro hors-ligne pour éviter de ré-enfiler.
+export async function envoyerMessage(destinataireId, contenu, media = null, opts = {}) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { data: null, error: { message: 'Non authentifié' } }
 
@@ -45,16 +47,26 @@ export async function envoyerMessage(destinataireId, contenu, media = null) {
     if (media.duree != null) payload.media_duree = media.duree
   }
 
-  const { data, error } = await supabase
-    .from('messages')
-    .insert(payload)
-    .select()
-    .single()
+  // Hors-ligne (texte seulement — un média nécessite le réseau pour l'upload).
+  // On enfile et on renvoie un message optimiste pour l'affichage immédiat.
+  const canQueue = !opts.noQueue && !media
+  if (canQueue && typeof navigator !== 'undefined' && !navigator.onLine) {
+    enqueue('message_send', { destinataireId, contenu: payload.contenu })
+    return { data: { ...payload, id: `pending-${Date.now()}`, created_at: new Date().toISOString(), lu: false, _pending: true }, error: null, pending: true }
+  }
 
-  // Déclenche la notification push au destinataire (best-effort)
-  if (data && !error) pushNewMessage(data)
-
-  return { data, error }
+  try {
+    const { data, error } = await supabase.from('messages').insert(payload).select().single()
+    if (error) throw error
+    pushNewMessage(data)
+    return { data, error: null }
+  } catch (e) {
+    if (canQueue && isNetworkError(e)) {
+      enqueue('message_send', { destinataireId, contenu: payload.contenu })
+      return { data: { ...payload, id: `pending-${Date.now()}`, created_at: new Date().toISOString(), lu: false, _pending: true }, error: null, pending: true }
+    }
+    return { data: null, error: e }
+  }
 }
 
 // Aperçu textuel d'un message pour la liste des conversations

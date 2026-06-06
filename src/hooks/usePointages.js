@@ -27,23 +27,24 @@ export function usePointages(opts = {}) {
   useEffect(() => { refresh() }, [refresh])
 
   async function start(chantierId) {
-    const { data, error } = await svcStart(chantierId)
+    const { data, error, pending } = await svcStart(chantierId)
     if (data) {
       setEnCours(data)
       setPointages((prev) => [data, ...prev])
     }
-    return { data, error }
+    return { data, error, pending }
   }
 
   async function end() {
     if (!enCours?.id) return { error: { message: 'Aucun pointage en cours' } }
-    const { data, error } = await svcEnd(enCours.id)
+    const { data, error, pending } = await svcEnd(enCours.id)
     if (data) {
       setEnCours(null)
-      // Re-fetch pour avoir les heures complètes
-      refresh()
+      // En ligne : re-fetch pour les heures complètes. Hors-ligne : on évite
+      // un appel réseau voué à l'échec (l'état optimiste suffit).
+      if (!pending) refresh()
     }
-    return { data, error }
+    return { data, error, pending }
   }
 
   return { pointages, enCours, loading, error, refresh, start, end }

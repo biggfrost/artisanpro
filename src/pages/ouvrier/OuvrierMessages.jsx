@@ -116,7 +116,7 @@ export default function OuvrierMessages() {
                     )}
                     <p className={`text-[10px] mt-0.5 px-1.5 pb-0.5 ${isMe ? 'text-orange-100' : 'text-slate-400'}`}>
                       {fmtTime(m.created_at)}
-                      {isMe && m.lu && ' · vu'}
+                      {m._pending ? ' · ⏳ envoi…' : (isMe && m.lu && ' · vu')}
                     </p>
                   </div>
                 </div>

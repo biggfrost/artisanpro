@@ -83,12 +83,17 @@ export default function OuvrierPlanning() {
   async function handlePointage(chantierId) {
     setPointing(true)
     haptic.medium()
+    const heure = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
     if (enCours) {
-      await end()
-      toast.success(`Départ enregistré à ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`)
+      const { pending } = await end()
+      toast.success(pending
+        ? `Départ enregistré (${heure}) — sera synchronisé au retour du réseau`
+        : `Départ enregistré à ${heure}`)
     } else if (chantierId) {
-      await start(chantierId)
-      toast.success(`Arrivée enregistrée à ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`)
+      const { pending } = await start(chantierId)
+      toast.success(pending
+        ? `Arrivée enregistrée (${heure}) — sera synchronisée au retour du réseau`
+        : `Arrivée enregistrée à ${heure}`)
     }
     setPointing(false)
   }

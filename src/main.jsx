@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import App from './App'
 import './index.css'
 import { testSupabaseConnection } from './services/supabase'
+import { startOfflineSync } from './services/offlineSync'
 
 // ── Service Worker — mise à jour agressive ────────────────────────
 if ('serviceWorker' in navigator) {
@@ -42,6 +43,9 @@ if ('serviceWorker' in navigator) {
 }
 
 testSupabaseConnection()
+
+// Synchro auto des actions hors-ligne (pointages, messages) à la reconnexion
+startOfflineSync()
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

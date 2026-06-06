@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import { triggerPush } from './pushTrigger'
+import { enqueue, isNetworkError } from './offlineQueue'
 
 // Soft fail si géolocalisation indispo / refusée
 export function tryGeolocate() {
@@ -40,48 +41,84 @@ export async function getPointageEnCours() {
   return { data, error }
 }
 
+// Construit un pointage optimiste (affiché immédiatement hors-ligne)
+function optimisticPointage(chantierId, heure) {
+  return {
+    id:            `pending-${Date.now()}`,
+    chantier_id:   chantierId,
+    heure_arrivee: heure,
+    chantier:      null,
+    _pending:      true,
+  }
+}
+
 // Démarre un pointage : "Je suis arrivé"
 export async function startPointage(chantierId) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { data: null, error: { message: 'Non authentifié' } }
+  const heure  = new Date().toISOString()
   const coords = await tryGeolocate()
+
+  // Hors-ligne → on enfile et on renvoie un pointage optimiste (jamais perdu)
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    enqueue('pointage_start', { chantierId, heure, lat: coords?.lat, lng: coords?.lng })
+    return { data: optimisticPointage(chantierId, heure), error: null, pending: true }
+  }
+
   const payload = {
     ouvrier_id:        user.id,
     chantier_id:       chantierId,
-    heure_arrivee:     new Date().toISOString(),
+    heure_arrivee:     heure,
     latitude_arrivee:  coords?.lat ?? null,
     longitude_arrivee: coords?.lng ?? null,
   }
-  const { data, error } = await supabase
-    .from('pointages')
-    .insert(payload)
-    .select('id, chantier_id, heure_arrivee, chantier:chantiers (id, nom, ville)')
-    .single()
-
-  // Notifie les managers : ouvrier arrivé sur chantier.
-  // On passe ouvrier_id → l'Edge Function résout l'entreprise.
-  if (data && !error) {
+  try {
+    const { data, error } = await supabase
+      .from('pointages')
+      .insert(payload)
+      .select('id, chantier_id, heure_arrivee, chantier:chantiers (id, nom, ville)')
+      .single()
+    if (error) throw error
     triggerPush({ type: 'INSERT', table: 'pointages', record: { ouvrier_id: user.id, chantier_id: chantierId } })
+    return { data, error: null }
+  } catch (e) {
+    // Échec réseau → on enfile + optimiste plutôt que de perdre le pointage
+    if (isNetworkError(e)) {
+      enqueue('pointage_start', { chantierId, heure, lat: coords?.lat, lng: coords?.lng })
+      return { data: optimisticPointage(chantierId, heure), error: null, pending: true }
+    }
+    return { data: null, error: e }
   }
-
-  return { data, error }
 }
 
 // Termine un pointage : "Je suis parti"
 export async function endPointage(pointageId) {
+  const heure  = new Date().toISOString()
   const coords = await tryGeolocate()
+
+  // Hors-ligne (ou pointage encore en attente de sync) → on enfile le départ
+  if ((typeof navigator !== 'undefined' && !navigator.onLine) || String(pointageId).startsWith('pending-')) {
+    enqueue('pointage_end', { heure, lat: coords?.lat, lng: coords?.lng })
+    return { data: { id: pointageId, heure_depart: heure, _pending: true }, error: null, pending: true }
+  }
+
   const payload = {
-    heure_depart:     new Date().toISOString(),
+    heure_depart:     heure,
     latitude_depart:  coords?.lat ?? null,
     longitude_depart: coords?.lng ?? null,
   }
-  const { data, error } = await supabase
-    .from('pointages')
-    .update(payload)
-    .eq('id', pointageId)
-    .select()
-    .single()
-  return { data, error }
+  try {
+    const { data, error } = await supabase
+      .from('pointages').update(payload).eq('id', pointageId).select().single()
+    if (error) throw error
+    return { data, error: null }
+  } catch (e) {
+    if (isNetworkError(e)) {
+      enqueue('pointage_end', { heure, lat: coords?.lat, lng: coords?.lng })
+      return { data: { id: pointageId, heure_depart: heure, _pending: true }, error: null, pending: true }
+    }
+    return { data: null, error: e }
+  }
 }
 
 // ─── Côté manager : pointages d'un ouvrier précis ─────────────
