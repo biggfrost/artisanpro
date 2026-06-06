@@ -83,12 +83,13 @@ function toFormState(devis) {
   }
 }
 
-export default function DevisForm({ initialData, onSubmit, onCancel, submitLabel }) {
+export default function DevisForm({ initialData, onSubmit, onCancel, submitLabel, numeroPreview, submitting }) {
   const [form, setForm]   = useState(() => toFormState(initialData))
   const [errors, setErrors] = useState({})
   const [pickerOpen, setPickerOpen] = useState(false)
   const artisan = useMemo(loadParametres, [])
-  const nextNumero = useMemo(peekNextDevisNumber, [])
+  // Numéro réel depuis Supabase si fourni, sinon estimation locale.
+  const nextNumero = numeroPreview || peekNextDevisNumber()
 
   // Auto-remplit le formulaire à partir d'un client sélectionné dans la liste.
   function applyClientFromPicker(c) {
@@ -380,9 +381,10 @@ export default function DevisForm({ initialData, onSubmit, onCancel, submitLabel
         </button>
         <button
           type="submit"
-          className="flex-1 px-4 py-3 rounded-xl bg-accent-500 hover:bg-accent-600 text-white font-semibold text-sm transition-colors shadow-sm"
+          disabled={submitting}
+          className="flex-1 px-4 py-3 rounded-xl bg-accent-500 hover:bg-accent-600 text-white font-semibold text-sm transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          {submitLabel || 'Créer le devis'}
+          {submitting ? 'Création…' : (submitLabel || 'Créer le devis')}
         </button>
       </div>
 

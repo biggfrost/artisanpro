@@ -16,12 +16,11 @@ import EmptyState from '../components/EmptyState'
 import DevisForm from '../components/forms/DevisForm'
 import { formatDate, formatCurrency } from '../utils/formatters'
 import { loadParametres, isParametresComplete } from '../services/parametres'
-import { getNextDevisNumber } from '../utils/devisNumero'
 import { downloadDevisPdf, envoyerDevisPdf } from '../utils/devisPdf'
 import { envoyerPourSignature, listTokensSignes, getSignatureParToken } from '../services/supabase'
 import {
   listDevisAuthenticated, normalizeDevis, updateDevisStatut, updateDevisEnAttente,
-  createDevisManager, markDevisAccepte, migrateLocalDevisToSupabase,
+  createDevisManager, markDevisAccepte, migrateLocalDevisToSupabase, getNextDevisNumero,
 } from '../services/devisService'
 import { UserCircle } from 'lucide-react'
 import { chantierFromDevis, createChantier, chantierExisteDejaPourDevis } from '../services/chantiersService'
@@ -71,6 +70,8 @@ export default function Devis() {
   const [sigSending, setSigSending]       = useState(false)
   const [sigError, setSigError]           = useState(null)
   const [copied, setCopied]               = useState(false)
+  const [creating, setCreating]           = useState(false)   // anti double-soumission
+  const [nextNumero, setNextNumero]       = useState('')      // aperçu du prochain n°
 
   const artisan = useMemo(loadParametres, [])
   const artisanOk = useMemo(() => isParametresComplete(artisan), [artisan])
@@ -169,7 +170,14 @@ export default function Devis() {
       })
   }, [mergedDevis, search, filter, sortDesc])
 
-  function openCreate() { setPrefill(null); setModalOpen(true) }
+  async function openCreate() {
+    setPrefill(null)
+    setModalOpen(true)
+    // Prefetch le vrai prochain numéro depuis Supabase pour l'afficher
+    if (ent?.id) {
+      try { setNextNumero(await getNextDevisNumero(ent.id)) } catch { setNextNumero('') }
+    }
+  }
 
   // Duplique un devis existant en gardant ses prestations comme point de
   // départ d'un NOUVEAU devis (procédure « annule et remplace »). Ne touche
@@ -191,11 +199,12 @@ export default function Devis() {
   }
 
   async function handleSubmit(data) {
-    const numero = data.numero || getNextDevisNumber()
-    const devisAvecNumero = { ...data, numero }
+    if (creating) return            // protège contre la double-soumission
+    setCreating(true)
 
-    // Création directement dans Supabase (source de vérité unique).
-    const { error } = await createDevisManager(devisAvecNumero)
+    // Le numéro est attribué côté Supabase (source unique, anti-collision).
+    const { data: created, error } = await createDevisManager(data)
+    setCreating(false)
     setModalOpen(false)
     setPrefill(null)
     if (error) {
@@ -203,11 +212,11 @@ export default function Devis() {
       return
     }
     await refresh()
-    toast.success(`Devis ${numero} créé`)
+    toast.success(`Devis ${created?.numero || ''} créé`)
 
     // Synchronise le client (le chantier sera créé à la signature, pas avant).
     if (ent?.id) {
-      try { await findOrCreateClient(ent.id, devisAvecNumero) } catch { /* silencieux */ }
+      try { await findOrCreateClient(ent.id, { ...data, numero: created?.numero }) } catch { /* silencieux */ }
     }
   }
 
@@ -479,7 +488,13 @@ export default function Devis() {
             </p>
           </div>
         )}
-        <DevisForm initialData={prefill} onSubmit={handleSubmit} onCancel={closeModal} />
+        <DevisForm
+          initialData={prefill}
+          onSubmit={handleSubmit}
+          onCancel={closeModal}
+          numeroPreview={nextNumero}
+          submitting={creating}
+        />
       </Modal>
 
       {/* Signature sending modal */}

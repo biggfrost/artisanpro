@@ -163,6 +163,53 @@ function devisToPayload(devis) {
   }
 }
 
+// ── Numéro de devis : généré depuis Supabase (source unique) ────────
+// Évite les collisions entre appareils/utilisateurs (l'ancien compteur
+// localStorage en générait par appareil → doublons possibles).
+export async function getNextDevisNumero(entrepriseId) {
+  // RPC SECURITY DEFINER : voit TOUS les devis de l'entreprise (manager +
+  // ouvriers), contrairement à une requête directe limitée par RLS.
+  const { data, error } = await supabase.rpc('next_devis_numero')
+  if (!error && typeof data === 'string' && data) return data
+
+  // Repli (avant exécution de la migration RPC) : requête directe.
+  const year   = new Date().getFullYear()
+  const prefix = `DEV-${year}-`
+  const { data: rows } = await supabase
+    .from('devis')
+    .select('numero')
+    .eq('entreprise_id', entrepriseId)
+    .like('numero', `${prefix}%`)
+    .order('numero', { ascending: false })
+    .limit(1)
+  let next = 1
+  const last = rows?.[0]?.numero
+  if (last) {
+    const n = parseInt(String(last).slice(prefix.length), 10)
+    if (Number.isFinite(n)) next = n + 1
+  }
+  return `${prefix}${String(next).padStart(3, '0')}`
+}
+
+function isUniqueViolation(error) {
+  return error?.code === '23505' || (error?.message || '').toLowerCase().includes('duplicate')
+}
+
+// Insère un devis en garantissant un numéro unique : génère depuis Supabase
+// si absent, et réessaie avec un nouveau numéro en cas de collision (course).
+async function insertDevisWithNumero(devis, base, entrepriseId) {
+  let numero = devis.numero
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (!numero) numero = await getNextDevisNumero(entrepriseId)
+    const payload = { ...devisToPayload({ ...devis, numero }), ...base }
+    const res = await insertDevisRow(payload)
+    if (!res.error) return res
+    if (isUniqueViolation(res.error)) { numero = null; continue } // numéro pris → régénère
+    return res // autre erreur → on remonte
+  }
+  return { data: null, error: { message: 'Impossible d\'attribuer un numéro de devis unique.' } }
+}
+
 // ── Création par un OUVRIER → en attente de validation manager ──────
 export async function createDevisComplet(devis) {
   const { data: { user } } = await supabase.auth.getUser()
@@ -172,14 +219,12 @@ export async function createDevisComplet(devis) {
     .from('utilisateurs').select('entreprise_id').eq('id', user.id).maybeSingle()
   if (!profile?.entreprise_id) return { data: null, error: { message: 'Entreprise non identifiée' } }
 
-  const payload = {
-    ...devisToPayload(devis),
+  const { data, error } = await insertDevisWithNumero(devis, {
     entreprise_id: profile.entreprise_id,
     cree_par:      user.id,
     statut:        'en_attente_validation',
-  }
+  }, profile.entreprise_id)
 
-  const { data, error } = await insertDevisRow(payload)
   if (data && !error) pushDevisSoumis(data)
   return { data: data ? normalizeDevis(data) : null, error }
 }
@@ -193,14 +238,12 @@ export async function createDevisManager(devis) {
     .from('utilisateurs').select('entreprise_id').eq('id', user.id).maybeSingle()
   if (!profile?.entreprise_id) return { data: null, error: { message: 'Entreprise non identifiée' } }
 
-  const payload = {
-    ...devisToPayload(devis),
+  const { data, error } = await insertDevisWithNumero(devis, {
     entreprise_id: profile.entreprise_id,
     cree_par:      user.id,
     statut:        devis.statut || 'envoye',
-  }
+  }, profile.entreprise_id)
 
-  const { data, error } = await insertDevisRow(payload)
   return { data: data ? normalizeDevis(data) : null, error }
 }
 

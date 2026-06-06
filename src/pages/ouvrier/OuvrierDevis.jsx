@@ -11,7 +11,6 @@ import SearchBar from '../../components/SearchBar'
 import EmptyState from '../../components/EmptyState'
 import DevisForm from '../../components/forms/DevisForm'
 import { formatCurrency, formatDate } from '../../utils/formatters'
-import { getNextDevisNumber } from '../../utils/devisNumero'
 import { downloadDevisPdf, envoyerDevisPdf } from '../../utils/devisPdf'
 import { loadArtisanProfilSupabase, getSignatureParToken } from '../../services/supabase'
 import { findOrCreateClient } from '../../services/clientsService'
@@ -104,8 +103,8 @@ export default function OuvrierDevis() {
 
   async function handleSubmit(data) {
     setSubmitError(null)
-    const payload = { ...data, numero: data.numero || getNextDevisNumber() }
-    const { error } = await addDevis(payload)
+    // Le numéro est attribué côté Supabase (source unique, anti-collision).
+    const { error } = await addDevis(data)
     if (error) {
       // Si erreur de contrainte CHECK → la migration SQL n'a pas été exécutée
       const msg = error.message || ''
