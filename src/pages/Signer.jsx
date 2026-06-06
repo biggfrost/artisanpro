@@ -3,11 +3,8 @@ import { useParams } from 'react-router-dom'
 import { CheckCircle, AlertCircle, Loader2, MapPin } from 'lucide-react'
 import SignaturePad from '../components/SignaturePad'
 import {
-  getDevisParToken,
-  getSignatureParToken,
-  signerParClient,
-  updateStatutDevisSupabase,
-  loadArtisanProfilSupabase,
+  getSignatureContext,
+  signDevisPublic,
 } from '../services/supabase'
 import { downloadDevisPdf } from '../utils/devisPdf'
 
@@ -93,24 +90,11 @@ export default function Signer() {
   // ── Load data ──────────────────────────────────────────────────
   useEffect(() => {
     async function init() {
-      console.log('[Signer] init() — token:', token)
-
-      const [
-        { data: devisData,  error: devisErr  },
-        { data: sigData,    error: sigErr    },
-        artisanProfile,
-      ] = await Promise.all([
-        getDevisParToken(token),
-        getSignatureParToken(token),
-        loadArtisanProfilSupabase(),
-      ])
-
-      console.log('[Signer] devisData:', devisData, '| devisErr:', devisErr)
-      console.log('[Signer] sigData:', sigData, '| sigErr:', sigErr)
-      console.log('[Signer] artisanProfile:', artisanProfile)
+      // Un seul appel sécurisé (RPC scopée au token) : devis + signature + artisan
+      const { devis: devisData, signature: sigData, artisan: artisanProfile } =
+        await getSignatureContext(token)
 
       if (!devisData || !sigData) {
-        console.warn('[Signer] Devis ou signatures introuvable → notFound')
         setState(S.notFound)
         return
       }
@@ -125,22 +109,12 @@ export default function Signer() {
       setDevis(devisData)
       setSigRecord(sigData)
 
-      // Source 1 : artisan_profil.signature_base64 (la plus à jour)
-      // Source 2 : signatures.signature_artisan_base64 (copie faite à l'envoi)
-      const fromProfil = artisanProfile?.signature_base64 || null
-      const fromRecord = sigData.signature_artisan_base64  || null
-      const artSig     = fromProfil || fromRecord || null
-
-      console.log('[Signer] signature_base64 depuis artisan_profil:', fromProfil ? `présente (${fromProfil.length} chars)` : 'absente')
-      console.log('[Signer] signature_artisan_base64 depuis signatures:', fromRecord ? `présente (${fromRecord.length} chars)` : 'absente')
-      console.log('[Signer] artSig final utilisé pour <img>:', artSig ? `présente (${artSig.length} chars)` : "NULLE — <img> ne s'affichera pas")
-
+      // Signature artisan : profil (à jour) puis copie dans la signature
+      const artSig = artisanProfile?.signature_base64 || sigData.signature_artisan_base64 || null
       setArtisanSig(artSig)
 
-      // Artisan info (ville, nom, siret…) depuis artisan_profil.donnees_json
-      const info = artisanProfile?.donnees_json ?? {}
-      console.log('[Signer] artisanInfo.ville:', info.ville)
-      setArtisanInfo(info)
+      // Infos artisan (ville, nom, siret…) depuis donnees_json
+      setArtisanInfo(artisanProfile?.donnees_json ?? {})
 
       setState(S.ready)
     }
@@ -153,13 +127,12 @@ export default function Signer() {
     setState(S.submitting)
     setError(null)
 
-    const { error: e1 } = await signerParClient(token, {
+    const { error: e1 } = await signDevisPublic(token, {
       signatureClientBase64: clientSig,
       ville,
     })
     if (e1) { setError(e1.message); setState(S.ready); return }
 
-    await updateStatutDevisSupabase(token, 'accepte')
     setState(S.success)
 
     // Generate and immediately download the signed PDF

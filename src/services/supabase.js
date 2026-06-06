@@ -259,6 +259,52 @@ export async function loadArtisanProfilSupabase() {
   }
 }
 
+// ─── Page de signature publique (via RPC sécurisées) ──────────────
+// Le client n'est pas authentifié : il accède UNIQUEMENT via ces RPC
+// SECURITY DEFINER scopées au token, jamais en accès direct aux tables.
+
+// Charge devis + signature + artisan pour un token. Repli sur l'accès
+// direct si la RPC n'existe pas encore (avant exécution de la migration).
+export async function getSignatureContext(token) {
+  const { data, error } = await supabase.rpc('get_signature_context', { p_token: token })
+  if (!error && data) {
+    return {
+      devis:     data.devis || null,
+      signature: data.signature || null,
+      artisan:   data.artisan || null,
+    }
+  }
+  // Repli (ancien chemin direct) — fonctionne tant que la migration n'est pas faite
+  const [{ data: devis }, { data: signature }, artisan] = await Promise.all([
+    getDevisParToken(token),
+    getSignatureParToken(token),
+    loadArtisanProfilSupabase(),
+  ])
+  return {
+    devis,
+    signature,
+    artisan: artisan
+      ? { signature_base64: artisan.signature_base64, donnees_json: artisan.donnees_json }
+      : null,
+  }
+}
+
+// Signe le devis (client). Repli sur l'ancien chemin si la RPC est absente.
+export async function signDevisPublic(token, { signatureClientBase64, ville }) {
+  const { data, error } = await supabase.rpc('sign_devis', {
+    p_token: token, p_signature: signatureClientBase64, p_ville: ville,
+  })
+  if (!error && data?.ok) return { error: null }
+  if (!error && data && data.ok === false) {
+    return { error: { message: 'Lien invalide ou devis déjà signé.' } }
+  }
+  // Repli (ancien chemin direct)
+  const { error: e1 } = await signerParClient(token, { signatureClientBase64, ville })
+  if (e1) return { error: e1 }
+  await updateStatutDevisSupabase(token, 'accepte')
+  return { error: null }
+}
+
 // ─── devis ───────────────────────────────────────────────────────
 
 export async function getDevisParToken(token) {
