@@ -14,18 +14,23 @@ const DATA_CACHE   = `artisanpro-data-${BUILD_ID}`
 const SHELL = ['/', '/index.html', '/manifest.json']
 const TO_PRECACHE = Array.from(new Set([...SHELL, ...PRECACHE]))
 
-// ── Install : précharge TOUT le build (résilient : un échec ne bloque pas) ──
+// ── Install : précharge TOUT le build ──────────────────────────────
+// addAll est atomique : si tout réussit, l'app entière est dispo hors-ligne.
+// En cas d'échec (réseau instable), on tente fichier par fichier (best-effort)
+// et le reste se complètera lors d'une prochaine visite en ligne.
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(STATIC_CACHE).then((cache) =>
-      Promise.allSettled(
-        TO_PRECACHE.map((url) =>
-          fetch(url, { cache: 'no-cache' })
-            .then((res) => { if (res.ok) return cache.put(url, res) })
-            .catch(() => {})
+    caches.open(STATIC_CACHE).then(async (cache) => {
+      try {
+        await cache.addAll(TO_PRECACHE)
+      } catch (_e) {
+        await Promise.allSettled(
+          TO_PRECACHE.map((url) =>
+            fetch(url).then((res) => { if (res.ok) return cache.put(url, res) }).catch(() => {})
+          )
         )
-      )
-    ).then(() => self.skipWaiting())
+      }
+    }).then(() => self.skipWaiting())
   )
 })
 
@@ -123,9 +128,10 @@ async function cacheFirst(request) {
     }
     return res
   } catch {
-    // Hors-ligne et non caché : on tente l'index (utile pour les chunks de route)
-    return (await caches.match('/index.html')) ||
-           new Response('', { status: 504 })
+    // Hors-ligne et non caché : échec PROPRE (504).
+    // On ne renvoie SURTOUT PAS l'index.html ici — sinon un fichier .js
+    // recevrait du HTML et le navigateur planterait.
+    return new Response('', { status: 504, statusText: 'Offline' })
   }
 }
 
