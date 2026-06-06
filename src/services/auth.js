@@ -32,7 +32,20 @@ export async function signInWithPassword({ email, password }) {
   return { data, error }
 }
 
+// Cache d'authentification (pour rester connecté hors-ligne sans appel réseau)
+const AUTH_CACHE = 'artisanpro_auth_cache'
+function saveAuthCache(state) {
+  try { localStorage.setItem(AUTH_CACHE, JSON.stringify(state)) } catch { /* quota */ }
+}
+function loadAuthCache() {
+  try { return JSON.parse(localStorage.getItem(AUTH_CACHE) || 'null') } catch { return null }
+}
+export function clearAuthCache() {
+  try { localStorage.removeItem(AUTH_CACHE) } catch { /* noop */ }
+}
+
 export async function signOut() {
+  clearAuthCache()   // important : ne pas restaurer une session après déconnexion
   const { error } = await supabase.auth.signOut()
   return { error }
 }
@@ -41,16 +54,33 @@ export async function signOut() {
 // Robuste : si les tables n'existent pas encore (SQL setup pas exécuté),
 // ou si la requête traîne, on retourne quand même un état utilisable.
 export async function fetchSessionProfile() {
+  const offline = typeof navigator !== 'undefined' && !navigator.onLine
+
+  // Hors-ligne : on s'appuie sur le cache d'auth pour rester connecté SANS
+  // appel réseau (qui resterait bloqué). L'utilisateur garde l'accès à l'app.
+  if (offline) {
+    const cache = loadAuthCache()
+    if (cache?.user) return cache
+  }
+
   let session = null
   try {
     const result = await withTimeout(supabase.auth.getSession(), 5000, 'getSession')
     session = result?.data?.session ?? null
   } catch (e) {
     console.warn(e.message)
+    // getSession a échoué (réseau ?) → on retombe sur le cache si disponible
+    const cache = loadAuthCache()
+    if (cache?.user) return cache
     return { user: null, profile: null, entreprise: null }
   }
 
-  if (!session?.user) return { user: null, profile: null, entreprise: null }
+  if (!session?.user) {
+    // Pas de session locale valide → vraiment déconnecté
+    return { user: null, profile: null, entreprise: null }
+  }
+
+  const cache = loadAuthCache()
 
   let profile = null
   try {
@@ -63,6 +93,8 @@ export async function fetchSessionProfile() {
   } catch (e) {
     console.warn(e.message)
   }
+  // Repli sur le profil mis en cache si le réseau a échoué
+  if (!profile && cache?.profile) profile = cache.profile
 
   let entreprise = null
   if (profile?.entreprise_id) {
@@ -76,8 +108,12 @@ export async function fetchSessionProfile() {
       console.warn(e.message)
     }
   }
+  if (!entreprise && cache?.entreprise) entreprise = cache.entreprise
 
-  return { user: session.user, profile, entreprise }
+  const state = { user: session.user, profile, entreprise }
+  // Met à jour le cache uniquement si on a un profil complet (état fiable)
+  if (profile) saveAuthCache(state)
+  return state
 }
 
 export function onAuthChange(callback) {

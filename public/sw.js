@@ -62,7 +62,13 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
-  // API Supabase / météo : réseau d'abord, repli cache
+  // Authentification Supabase : NE JAMAIS intercepter. Laisser le navigateur
+  // gérer (une fausse réponse hors-ligne corromprait la session persistée).
+  if (url.hostname.includes('supabase') && url.pathname.startsWith('/auth/')) {
+    return
+  }
+
+  // API Supabase (données) / météo : réseau d'abord, repli cache
   if (url.hostname.includes('supabase') || url.hostname.includes('open-meteo')) {
     event.respondWith(networkFirst(request))
     return

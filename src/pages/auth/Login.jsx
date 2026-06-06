@@ -43,6 +43,10 @@ export default function Login() {
   async function handleSubmit(e) {
     e.preventDefault()
     if (loading) return
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setError("Connexion impossible hors-ligne. Reconnectez-vous à internet pour vous identifier (une fois connecté, l'app reste accessible sans réseau).")
+      return
+    }
     setLoading(true)
     setError(null)
     try {
