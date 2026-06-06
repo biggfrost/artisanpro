@@ -408,14 +408,29 @@ export async function signerParClient(token, { signatureClientBase64, ville }) {
 
 export async function envoyerPourSignature(devis /* , artisan */) {
   const token = crypto.randomUUID()
+  let devisId = null
 
-  // 1 — Sauvegarder le devis dans Supabase
-  const { data: devisData, error: devisError } = await creerDevisSupabase(devis, token)
-  if (devisError) return { error: devisError }
+  // 1 — Le devis existe déjà en base (source de vérité Supabase) → on lui
+  //     attache simplement le token, SANS créer de doublon.
+  if (devis?.id && devis?._source === 'supabase') {
+    const { data, error } = await supabase
+      .from('devis')
+      .update({ token_unique: token })
+      .eq('id', devis.id)
+      .select('id')
+      .single()
+    if (error) return { error }
+    devisId = data.id
+  } else {
+    // Sinon (ancien devis non encore migré) → on crée la ligne.
+    const { data: devisData, error: devisError } = await creerDevisSupabase(devis, token)
+    if (devisError) return { error: devisError }
+    devisId = devisData.id
+  }
 
-  // 2 — Créer l'enregistrement de signature (la signature artisan n'est pas
-  // stockée ici — la page Signer la lit à la demande depuis artisan_profil).
-  const { error: sigError } = await creerSignatureRecord(devisData.id, token)
+  // 2 — Créer l'enregistrement de signature (la signature artisan est lue
+  //     à la demande depuis artisan_profil par la page Signer).
+  const { error: sigError } = await creerSignatureRecord(devisId, token)
   if (sigError) return { error: sigError }
 
   const signingUrl = `${SIGNING_BASE_URL}/${token}`

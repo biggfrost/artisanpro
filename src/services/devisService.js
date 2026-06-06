@@ -9,10 +9,40 @@ const SELECT_WITH_CREATOR = `
   createur:utilisateurs!devis_cree_par_fkey!left ( id, nom, prenom, role )
 `
 
-// RLS filtre automatiquement :
-//   - manager → tous les devis de son entreprise
-//   - ouvrier → ses propres devis uniquement
-// Utilisé par la page MANAGER (Devis.jsx) qui veut voir tout l'entreprise.
+// Colonnes "riches" ajoutées par la migration d'unification. Si la migration
+// n'a pas encore été exécutée, les écritures retombent sur les colonnes de base.
+const RICH_COLS = ['prestations', 'total_ttc', 'conditions_paiement', 'acompte_pct', 'signed_at', 'signed_ville']
+
+function stripRichCols(payload) {
+  const p = { ...payload }
+  for (const c of RICH_COLS) delete p[c]
+  return p
+}
+function isMissingColumnError(error) {
+  const m = (error?.message || '').toLowerCase()
+  return m.includes('could not find') || m.includes('schema cache') ||
+         (m.includes('column') && m.includes('does not exist')) || error?.code === 'PGRST204'
+}
+
+// Insert/Update résilients : tentent le payload complet, et en cas de colonne
+// manquante (migration non faite) réessaient sans les colonnes riches.
+async function insertDevisRow(payload) {
+  let res = await supabase.from('devis').insert(payload).select(SELECT_WITH_CREATOR).single()
+  if (res.error && isMissingColumnError(res.error)) {
+    res = await supabase.from('devis').insert(stripRichCols(payload)).select(SELECT_WITH_CREATOR).single()
+  }
+  return res
+}
+async function updateDevisRow(id, payload) {
+  let res = await supabase.from('devis').update(payload).eq('id', id).select(SELECT_WITH_CREATOR).single()
+  if (res.error && isMissingColumnError(res.error)) {
+    res = await supabase.from('devis').update(stripRichCols(payload)).eq('id', id).select(SELECT_WITH_CREATOR).single()
+  }
+  return res
+}
+
+// ── Listing ────────────────────────────────────────────────────────
+// RLS : manager → tous les devis de l'entreprise ; ouvrier → les siens.
 export async function listDevisAuthenticated() {
   const { data, error } = await supabase
     .from('devis')
@@ -21,10 +51,6 @@ export async function listDevisAuthenticated() {
   return { data: data ?? [], error }
 }
 
-// Variante stricte : filtre explicitement par cree_par = auth.uid().
-// Défense en profondeur — utilisée par l'app OUVRIER pour garantir qu'un
-// employé ne voit JAMAIS les devis d'autres utilisateurs, même si RLS
-// est mal configuré.
 export async function listMesDevisCreated() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { data: [], error: { message: 'Non authentifié' } }
@@ -36,48 +62,59 @@ export async function listMesDevisCreated() {
   return { data: data ?? [], error }
 }
 
-// Normalise un row Supabase (snake_case) vers le format UI camelCase
-// utilisé par les composants DevisCard / DevisForm.
+// ── Normalisation (row Supabase → format UI camelCase) ──────────────
 export function normalizeDevis(d) {
   if (!d) return d
   const montantHT = Number(d.montant_ht ?? 0)
   const tauxTVA   = Number(d.taux_tva   ?? 20)
   const totalTVA  = montantHT * tauxTVA / 100
-  const totalTTC  = montantHT + totalTVA
-  return {
-    id:                d.id,
-    numero:            d.numero,
-    client:            d.client_nom || '',
-    clientTelephone:   d.client_telephone || '',
-    clientEmail:       d.client_email || '',
-    clientAdresse:     d.client_adresse || '',
-    description:       d.description || '',
-    dateEmission:      d.date_emission,
-    date:              d.date_emission,
-    dateValidite:      d.date_validite,
-    statut:            normalizeStatut(d.statut),
-    tokenUnique:       d.token_unique,
-    montantHT, totalHT: montantHT, totalTVA, totalTTC,
-    prestations: [{
+  const totalTTC  = d.total_ttc != null ? Number(d.total_ttc) : montantHT + totalTVA
+
+  // Prestations : détail complet si disponible (jsonb), sinon reconstruit
+  // une ligne unique à partir de la description aplatie (anciens devis).
+  let prestations
+  if (Array.isArray(d.prestations) && d.prestations.length) {
+    prestations = d.prestations
+  } else {
+    prestations = [{
       description:    d.description || '',
       quantite:       1,
+      unite:          'u',
       prixUnitaireHT: montantHT,
       tauxTVA,
-    }],
-    createdAt:         d.created_at,
-    cree_par:          d.cree_par,
-    entreprise_id:     d.entreprise_id,
-    createur:          d.createur,   // { id, nom, prenom, role } ou null
-    _source:           'supabase',
+    }]
+  }
+
+  return {
+    id:                 d.id,
+    numero:             d.numero,
+    client:             d.client_nom || '',
+    clientTelephone:    d.client_telephone || '',
+    clientEmail:        d.client_email || '',
+    clientAdresse:      d.client_adresse || '',
+    description:        d.description || '',
+    dateEmission:       d.date_emission,
+    date:               d.date_emission,
+    dateValidite:       d.date_validite,
+    statut:             normalizeStatut(d.statut),
+    tokenUnique:        d.token_unique,
+    montantHT, totalHT: montantHT, totalTVA, totalTTC,
+    prestations,
+    conditionsPaiement: d.conditions_paiement || '',
+    acomptePct:         d.acompte_pct ?? null,
+    signedAt:           d.signed_at || null,
+    signedVille:        d.signed_ville || null,
+    createdAt:          d.created_at,
+    cree_par:           d.cree_par,
+    entreprise_id:      d.entreprise_id,
+    createur:           d.createur,
+    _source:            'supabase',
   }
 }
 
-// Le default Supabase est "Envoyé" (avec accent), l'UI utilise 'envoye'
-// (minuscule sans accent). On normalise.
 function normalizeStatut(s) {
   if (!s) return 'envoye'
-  const lower = s.toLowerCase()
-                 .normalize('NFD').replace(/[̀-ͯ]/g, '')   // strip accents
+  const lower = s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
   if (lower.includes('attente') || lower === 'en_attente_validation') return 'en_attente_validation'
   if (lower.includes('accept')) return 'accepte'
   if (lower.includes('refus'))  return 'refuse'
@@ -85,67 +122,89 @@ function normalizeStatut(s) {
   return 'envoye'
 }
 
-// Crée un devis "complet" (pas seulement pour signature) avec entreprise_id
-// et cree_par auto-déduits depuis la session.
-export async function createDevisComplet(devis) {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { data: null, error: { message: 'Non authentifié' } }
-
-  // Récupère l'entreprise du créateur
-  const { data: profile } = await supabase
-    .from('utilisateurs')
-    .select('entreprise_id')
-    .eq('id', user.id)
-    .maybeSingle()
-  if (!profile?.entreprise_id) return { data: null, error: { message: 'Entreprise non identifiée' } }
-
-  // Construit la description depuis prestations
+// ── Construction du payload depuis un devis UI ──────────────────────
+function devisToPayload(devis) {
+  // Description aplatie (compat anciens lecteurs + recherche)
   let description = devis.description || ''
   if (Array.isArray(devis.prestations) && devis.prestations.length) {
     description = devis.prestations.map((p) => p.description).filter(Boolean).join(' / ')
   }
 
-  // Montant HT (somme prestations OU valeur explicite)
+  // Montant HT : explicite ou somme des prestations
   let montant_ht = Number(devis.totalHT ?? devis.montantHT ?? 0)
   if (!montant_ht && Array.isArray(devis.prestations)) {
-    montant_ht = devis.prestations.reduce((s, p) => {
-      return s + Number(p.quantite ?? 1) * Number(p.prixUnitaireHT ?? 0)
-    }, 0)
+    montant_ht = devis.prestations.reduce((s, p) =>
+      s + Number(p.quantite ?? 1) * Number(p.prixUnitaireHT ?? 0), 0)
   }
-  const taux_tva = Number(devis.tauxTVA ?? devis.prestations?.[0]?.tauxTVA ?? 20)
+  const taux_tva  = Number(devis.tauxTVA ?? devis.prestations?.[0]?.tauxTVA ?? 20)
+  const total_ttc = devis.totalTTC != null
+    ? Number(devis.totalTTC)
+    : montant_ht + montant_ht * taux_tva / 100
 
   const adresseComplete = [devis.clientAdresse, devis.clientCodePostal, devis.clientVille]
-    .filter(Boolean).join(', ')
+    .filter(Boolean).join(', ') || devis.clientAdresse || ''
 
-  const payload = {
-    entreprise_id:    profile.entreprise_id,
-    cree_par:         user.id,
-    numero:           devis.numero || '',
-    client_nom:       devis.client || '',
-    client_email:     devis.clientEmail || '',
-    client_telephone: devis.clientTelephone || devis.telephone || '',
-    client_adresse:   adresseComplete,
+  return {
+    numero:              devis.numero || '',
+    client_nom:          devis.client || '',
+    client_email:        devis.clientEmail || '',
+    client_telephone:    devis.clientTelephone || devis.telephone || '',
+    client_adresse:      adresseComplete,
     description,
     montant_ht,
     taux_tva,
-    date_emission:    devis.dateEmission || devis.date || null,
-    date_validite:    devis.dateValidite || null,
-    statut:           'en_attente_validation',   // toujours soumis à validation manager
+    total_ttc,
+    date_emission:       devis.dateEmission || devis.date || null,
+    date_validite:       devis.dateValidite || null,
+    conditions_paiement: devis.conditionsPaiement || null,
+    acompte_pct:         devis.acomptePct ?? null,
+    // Détail complet des lignes (jsonb)
+    prestations:         Array.isArray(devis.prestations) ? devis.prestations : null,
+  }
+}
+
+// ── Création par un OUVRIER → en attente de validation manager ──────
+export async function createDevisComplet(devis) {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { data: null, error: { message: 'Non authentifié' } }
+
+  const { data: profile } = await supabase
+    .from('utilisateurs').select('entreprise_id').eq('id', user.id).maybeSingle()
+  if (!profile?.entreprise_id) return { data: null, error: { message: 'Entreprise non identifiée' } }
+
+  const payload = {
+    ...devisToPayload(devis),
+    entreprise_id: profile.entreprise_id,
+    cree_par:      user.id,
+    statut:        'en_attente_validation',
   }
 
-  const { data, error } = await supabase
-    .from('devis')
-    .insert(payload)
-    .select(SELECT_WITH_CREATOR)
-    .single()
-
-  // Notifie les managers : nouveau devis en attente de validation
+  const { data, error } = await insertDevisRow(payload)
   if (data && !error) pushDevisSoumis(data)
-
   return { data: data ? normalizeDevis(data) : null, error }
 }
 
-// `ancienStatut` optionnel → déclenche la bonne notification (validé/refusé/signé)
+// ── Création par un MANAGER → directement "envoyé" (source de vérité) ─
+export async function createDevisManager(devis) {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { data: null, error: { message: 'Non authentifié' } }
+
+  const { data: profile } = await supabase
+    .from('utilisateurs').select('entreprise_id').eq('id', user.id).maybeSingle()
+  if (!profile?.entreprise_id) return { data: null, error: { message: 'Entreprise non identifiée' } }
+
+  const payload = {
+    ...devisToPayload(devis),
+    entreprise_id: profile.entreprise_id,
+    cree_par:      user.id,
+    statut:        devis.statut || 'envoye',
+  }
+
+  const { data, error } = await insertDevisRow(payload)
+  return { data: data ? normalizeDevis(data) : null, error }
+}
+
+// ── Mise à jour du statut (+ notification selon transition) ─────────
 export async function updateDevisStatut(id, statut, ancienStatut = null) {
   const { data, error } = await supabase
     .from('devis')
@@ -153,51 +212,68 @@ export async function updateDevisStatut(id, statut, ancienStatut = null) {
     .eq('id', id)
     .select('id, numero, statut, cree_par, entreprise_id')
     .maybeSingle()
-
   if (data && !error && ancienStatut) pushDevisStatut(data, ancienStatut)
-
   return { error, data }
 }
 
-// Permet au manager de corriger un devis encore en_attente_validation
-// avant de l'approuver. Le statut reste inchangé.
+// ── Édition complète (manager corrige un devis avant validation) ────
 export async function updateDevisEnAttente(id, devis) {
-  let description = devis.description || ''
-  if (Array.isArray(devis.prestations) && devis.prestations.length) {
-    description = devis.prestations.map((p) => p.description).filter(Boolean).join(' / ')
-  }
+  const { data, error } = await updateDevisRow(id, devisToPayload(devis))
+  return { data: data ? normalizeDevis(data) : null, error }
+}
 
-  let montant_ht = Number(devis.totalHT ?? devis.montantHT ?? 0)
-  if (!montant_ht && Array.isArray(devis.prestations)) {
-    montant_ht = devis.prestations.reduce((s, p) => {
-      return s + Number(p.quantite ?? 1) * Number(p.prixUnitaireHT ?? 0)
-    }, 0)
-  }
-  const taux_tva = Number(devis.tauxTVA ?? devis.prestations?.[0]?.tauxTVA ?? 20)
-
-  const adresseComplete = [devis.clientAdresse, devis.clientCodePostal, devis.clientVille]
-    .filter(Boolean).join(', ')
-
-  const payload = {
-    numero:           devis.numero || '',
-    client_nom:       devis.client || '',
-    client_email:     devis.clientEmail || '',
-    client_telephone: devis.clientTelephone || devis.telephone || '',
-    client_adresse:   adresseComplete,
-    description,
-    montant_ht,
-    taux_tva,
-    date_emission:    devis.dateEmission || devis.date || null,
-    date_validite:    devis.dateValidite || null,
-    // statut inchangé — reste 'en_attente_validation'
-  }
-
+// ── Associe un token de signature à un devis EXISTANT (pas de doublon) ─
+export async function setDevisToken(id, token) {
   const { data, error } = await supabase
     .from('devis')
-    .update(payload)
+    .update({ token_unique: token, statut: 'envoye' })
     .eq('id', id)
     .select(SELECT_WITH_CREATOR)
     .single()
-
   return { data: data ? normalizeDevis(data) : null, error }
+}
+
+// ── Marque un devis comme accepté (signature client reçue) ──────────
+export async function markDevisAccepte(id, { signedAt, signedVille } = {}) {
+  const payload = { statut: 'accepte', signed_at: signedAt || new Date().toISOString(), signed_ville: signedVille || null }
+  const { data, error } = await updateDevisRow(id, payload)
+  return { data: data ? normalizeDevis(data) : null, error }
+}
+
+// ── Migration one-shot : copie les devis localStorage vers Supabase ──
+// Idempotente : ne ré-insère pas un numéro déjà présent. Ne supprime RIEN
+// du localStorage (sécurité : aucune perte si quelque chose tourne mal).
+export async function migrateLocalDevisToSupabase(localDevis) {
+  if (!Array.isArray(localDevis) || !localDevis.length) return { migrated: 0 }
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { migrated: 0 }
+  const { data: profile } = await supabase
+    .from('utilisateurs').select('entreprise_id').eq('id', user.id).maybeSingle()
+  if (!profile?.entreprise_id) return { migrated: 0 }
+
+  // Numéros déjà en base (pour ne pas dupliquer)
+  const { data: existing } = await supabase
+    .from('devis').select('numero, token_unique').eq('entreprise_id', profile.entreprise_id)
+  const existingNumeros = new Set((existing || []).map((d) => d.numero).filter(Boolean))
+  const existingTokens  = new Set((existing || []).map((d) => d.token_unique).filter(Boolean))
+
+  let migrated = 0
+  for (const d of localDevis) {
+    // Déjà en base (par numéro ou par token) → on saute
+    if (d.numero && existingNumeros.has(d.numero)) continue
+    if (d.tokenUnique && existingTokens.has(d.tokenUnique)) continue
+
+    const payload = {
+      ...devisToPayload(d),
+      entreprise_id: profile.entreprise_id,
+      cree_par:      user.id,
+      statut:        d.statut || 'envoye',
+      token_unique:  d.tokenUnique || null,
+      signed_at:     d.signedAt || null,
+      signed_ville:  d.signedVille || null,
+    }
+    const { error } = await insertDevisRow(payload)
+    if (!error) { migrated++; if (d.numero) existingNumeros.add(d.numero) }
+  }
+  return { migrated }
 }

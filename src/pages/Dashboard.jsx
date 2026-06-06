@@ -5,7 +5,6 @@ import {
   TrendingUp, ChevronRight, BarChart3, ArrowUpRight, Settings, UserCircle2,
   AlertTriangle,
 } from 'lucide-react'
-import { useDevis } from '../hooks/useDevis'
 import { useChantiers } from '../hooks/useChantiers'
 import StatCard from '../components/StatCard'
 import Badge from '../components/Badge'
@@ -18,7 +17,6 @@ import { acceptedDevisNumeros, isChantierLegitime } from '../utils/chantierLogic
 import { useAuth } from '../contexts/AuthContext'
 
 export default function Dashboard() {
-  const { devis }               = useDevis()
   const { chantiers, refresh: refreshChantiers } = useChantiers()
   const navigate                = useNavigate()
   const artisan                 = useMemo(loadParametres, [])
@@ -34,8 +32,8 @@ export default function Dashboard() {
 
   useEffect(() => { fetchDevis() }, [fetchDevis])
 
-  // Tous les devis (local + Supabase, dédupliqués, statut le plus avancé gagne)
-  const allDevis = useMemo(() => mergeDevis(devis, supabaseDevis), [devis, supabaseDevis])
+  // Source unique : Supabase. mergeDevis([], …) déduplique les éventuels doublons hérités.
+  const allDevis = useMemo(() => mergeDevis([], supabaseDevis), [supabaseDevis])
 
   // Temps réel
   const handleRealtimeChange = useCallback(() => {

@@ -8,7 +8,7 @@ import {
   MessageCircle, MessageSquare,
 } from 'lucide-react'
 import { todayISO } from '../utils/formatters'
-import { useDevis } from '../hooks/useDevis'
+import { loadDevis } from '../services/storage'
 import Modal from '../components/Modal'
 import Badge from '../components/Badge'
 import SearchBar from '../components/SearchBar'
@@ -19,7 +19,10 @@ import { loadParametres, isParametresComplete } from '../services/parametres'
 import { getNextDevisNumber } from '../utils/devisNumero'
 import { downloadDevisPdf, envoyerDevisPdf } from '../utils/devisPdf'
 import { envoyerPourSignature, listTokensSignes, getSignatureParToken } from '../services/supabase'
-import { listDevisAuthenticated, normalizeDevis, updateDevisStatut, updateDevisEnAttente } from '../services/devisService'
+import {
+  listDevisAuthenticated, normalizeDevis, updateDevisStatut, updateDevisEnAttente,
+  createDevisManager, markDevisAccepte, migrateLocalDevisToSupabase,
+} from '../services/devisService'
 import { UserCircle } from 'lucide-react'
 import { chantierFromDevis, createChantier, chantierExisteDejaPourDevis } from '../services/chantiersService'
 import { findOrCreateClient } from '../services/clientsService'
@@ -50,25 +53,21 @@ const STATUS_LABELS = {
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000
 
 export default function Devis() {
-  // updateDevis et deleteDevis ne sont PAS exposés à l'UI : conformément à
-  // l'article 286 du CGI, un devis émis est inaltérable. updateDevis est
-  // utilisé en interne UNIQUEMENT pour les métadonnées (statut, tokenUnique,
-  // signedAt) — jamais pour le contenu du devis.
-  const { devis, addDevis, updateDevis } = useDevis()
+  // SOURCE DE VÉRITÉ UNIQUE : Supabase. Plus de localStorage pour les devis.
+  // Conformément au CGI art. 286, le CONTENU d'un devis émis reste inaltérable ;
+  // seules les métadonnées (statut, token, signature) évoluent.
   const location   = useLocation()
   const navigate   = useNavigate()
-  // Déclarés tôt pour être disponibles dans syncSignedDevis (useCallback)
-  const ent  = useAuth().entreprise
+  const ent   = useAuth().entreprise
   const toast = useToast()
   const [search, setSearch]               = useState('')
   const [filter, setFilter]               = useState(() => location.state?.filter ?? 'tous')
   const [sortDesc, setSortDesc]           = useState(true)
   const [modalOpen, setModalOpen]         = useState(false)
-  // prefill = source d'une duplication (annule-et-remplace). Pas d'édition.
   const [prefill, setPrefill]             = useState(null)
   const [pdfAlert, setPdfAlert]           = useState(false)
-  const [sigModal, setSigModal]           = useState(null)  // devis being sent
-  const [sigResult, setSigResult]         = useState(null)  // { signingUrl }
+  const [sigModal, setSigModal]           = useState(null)
+  const [sigResult, setSigResult]         = useState(null)
   const [sigSending, setSigSending]       = useState(false)
   const [sigError, setSigError]           = useState(null)
   const [copied, setCopied]               = useState(false)
@@ -76,78 +75,70 @@ export default function Devis() {
   const artisan = useMemo(loadParametres, [])
   const artisanOk = useMemo(() => isParametresComplete(artisan), [artisan])
 
-  // Devis Supabase (incluant ceux émis par les ouvriers de l'entreprise).
-  // RLS filtre déjà : un manager voit tous les devis de son entreprise.
+  // Tous les devis viennent de Supabase (manager + ouvriers de l'entreprise).
   const [supabaseDevis, setSupabaseDevis] = useState([])
+
+  const refresh = useCallback(async () => {
+    const { data } = await listDevisAuthenticated()
+    setSupabaseDevis(data.map(normalizeDevis))
+  }, [])
+
+  // Au montage : migration one-shot des anciens devis localStorage → Supabase
+  // (copie non destructive), puis chargement depuis Supabase.
   useEffect(() => {
     let cancelled = false
     ;(async () => {
-      const { data } = await listDevisAuthenticated()
-      if (!cancelled) setSupabaseDevis(data.map(normalizeDevis))
+      try {
+        const local = loadDevis()
+        if (Array.isArray(local) && local.length) {
+          await migrateLocalDevisToSupabase(local)
+        }
+      } catch { /* migration best-effort */ }
+      if (!cancelled) await refresh()
     })()
     return () => { cancelled = true }
-  }, [])
+  }, [refresh])
 
-  // Fusion localStorage + Supabase.
-  // mergeDevis garantit qu'un devis 'accepte' gagne toujours sur 'envoye',
-  // élimine les doublons internes à Supabase, et donne priorité aux devis
-  // ouvriers sur les copies locales de même numéro.
-  const mergedDevis = useMemo(() => mergeDevis(devis, supabaseDevis), [devis, supabaseDevis])
+  // Déduplique les éventuels doublons hérités encore présents en base.
+  const mergedDevis = useMemo(() => mergeDevis([], supabaseDevis), [supabaseDevis])
 
-  // Refs pour que le sync utilise toujours les dernières versions sans relancer l'effet.
-  const devisRef = useRef(devis)
-  const updateDevisRef = useRef(updateDevis)
-  useEffect(() => { devisRef.current = devis }, [devis])
-  useEffect(() => { updateDevisRef.current = updateDevis }, [updateDevis])
+  // Garde une réf. à jour pour le sync sans relancer l'effet.
+  const devisRef = useRef(mergedDevis)
+  useEffect(() => { devisRef.current = mergedDevis }, [mergedDevis])
 
-  // Synchronise depuis Supabase : pour chaque devis local ayant un tokenUnique
-  // et qui n'est pas encore accepté, vérifie si le client l'a signé.
-  // C'est la SEULE voie légitime pour passer un devis en statut 'accepte'.
-  // En cas d'acceptation : marque le devis + crée automatiquement le chantier.
+  // Vérifie les signatures clients : SEULE voie pour passer un devis en
+  // 'accepte'. À l'acceptation : marque le devis en base + crée le chantier.
   const syncSignedDevis = useCallback(async () => {
     const list = devisRef.current
-    const tokens = list
-      .filter((d) => d.tokenUnique && d.statut !== 'accepte')
-      .map((d) => d.tokenUnique)
-    if (!tokens.length) return
-    const signed = await listTokensSignes(tokens)
+    const pending = list.filter((d) => d.tokenUnique && d.statut !== 'accepte')
+    if (!pending.length) return
+    const signed = await listTokensSignes(pending.map((d) => d.tokenUnique))
     if (!signed.length) return
-    const upd = updateDevisRef.current
-    for (const s of signed) {
-      const local = list.find((d) => d.tokenUnique === s.token)
-      if (local && local.statut !== 'accepte') {
-        // 1. Marque le devis comme accepté (signature client reçue)
-        const devisAccepte = {
-          ...local,
-          statut:      'accepte',
-          signedAt:    s.signe_le,
-          signedVille: s.ville_client,
-        }
-        upd(local.id, {
-          statut:      'accepte',
-          signedAt:    s.signe_le,
-          signedVille: s.ville_client,
-        })
 
-        // 2. Crée automatiquement le chantier correspondant (statut planifie)
-        //    uniquement si aucun chantier n'existe déjà pour ce devis
-        if (ent?.id) {
-          try {
-            const dejaPresent = await chantierExisteDejaPourDevis(local.numero)
-            if (!dejaPresent) {
-              const chantierForm = chantierFromDevis(devisAccepte)
-              await createChantier(ent.id, chantierForm)
-              toast.success(`✅ Devis ${local.numero} accepté — chantier créé automatiquement`)
-            } else {
-              toast.success(`✅ Devis ${local.numero} signé par le client`)
-            }
-          } catch { /* silencieux */ }
-        }
+    let changed = false
+    for (const s of signed) {
+      const dv = pending.find((d) => d.tokenUnique === s.token)
+      if (!dv) continue
+      // 1. Marque accepté en base (signed_at / signed_ville)
+      await markDevisAccepte(dv.id, { signedAt: s.signe_le, signedVille: s.ville_client })
+      changed = true
+      // 2. Crée le chantier (planifié) si pas déjà présent
+      if (ent?.id) {
+        try {
+          const deja = await chantierExisteDejaPourDevis(dv.numero)
+          if (!deja) {
+            await createChantier(ent.id, chantierFromDevis({ ...dv, statut: 'accepte', signedAt: s.signe_le }))
+            toast.success(`✅ Devis ${dv.numero} accepté — chantier créé automatiquement`)
+          } else {
+            toast.success(`✅ Devis ${dv.numero} signé par le client`)
+          }
+        } catch { /* silencieux */ }
       }
     }
-  }, [ent?.id, toast])
+    if (changed) refresh()
+  }, [ent?.id, toast, refresh])
 
-  // Sync au montage + quand l'onglet redevient visible (l'utilisateur revient sur l'app).
+  // Sync au montage + au retour sur l'onglet.
   useEffect(() => {
     syncSignedDevis()
     const onVisible = () => { if (!document.hidden) syncSignedDevis() }
@@ -202,18 +193,21 @@ export default function Devis() {
   async function handleSubmit(data) {
     const numero = data.numero || getNextDevisNumber()
     const devisAvecNumero = { ...data, numero }
-    addDevis(devisAvecNumero)
+
+    // Création directement dans Supabase (source de vérité unique).
+    const { error } = await createDevisManager(devisAvecNumero)
     setModalOpen(false)
     setPrefill(null)
+    if (error) {
+      toast.error('Erreur lors de la création du devis : ' + error.message)
+      return
+    }
+    await refresh()
+    toast.success(`Devis ${numero} créé`)
 
-    // Side effect : synchronise le client dans Supabase.
-    // Le chantier sera créé automatiquement UNIQUEMENT quand le client
-    // signe le devis — pas avant. Créer un chantier avant signature serait
-    // illogique (le client n'a pas encore accepté la mission).
+    // Synchronise le client (le chantier sera créé à la signature, pas avant).
     if (ent?.id) {
-      try {
-        await findOrCreateClient(ent.id, devisAvecNumero)
-      } catch { /* silencieux */ }
+      try { await findOrCreateClient(ent.id, devisAvecNumero) } catch { /* silencieux */ }
     }
   }
 
@@ -273,7 +267,8 @@ export default function Devis() {
       setSigError(res.error.message || 'Erreur lors de la création du lien de signature.')
     } else {
       setSigResult(res)
-      updateDevis(d.id, { tokenUnique: res.token, statut: 'envoye' })
+      // Le token a été attaché au devis en base → on rafraîchit la liste.
+      refresh()
     }
   }
 
@@ -314,12 +309,8 @@ export default function Devis() {
   async function handleApprove(d) {
     setValidating((v) => ({ ...v, [d.id]: 'approve' }))
     haptic.success()
-    if (d._source === 'supabase') {
-      await updateDevisStatut(d.id, 'envoye', 'en_attente_validation')
-      setSupabaseDevis((prev) => prev.map((x) => x.id === d.id ? { ...x, statut: 'envoye' } : x))
-    } else {
-      updateDevis(d.id, { statut: 'envoye' })
-    }
+    await updateDevisStatut(d.id, 'envoye', 'en_attente_validation')
+    setSupabaseDevis((prev) => prev.map((x) => x.id === d.id ? { ...x, statut: 'envoye' } : x))
     toast.success(`Devis ${d.numero || ''} validé — l'ouvrier peut maintenant l'envoyer`)
     setValidating((v) => { const n = { ...v }; delete n[d.id]; return n })
   }
@@ -327,12 +318,8 @@ export default function Devis() {
   async function handleRefuse(d) {
     setValidating((v) => ({ ...v, [d.id]: 'refuse' }))
     haptic.warning()
-    if (d._source === 'supabase') {
-      await updateDevisStatut(d.id, 'refuse', 'en_attente_validation')
-      setSupabaseDevis((prev) => prev.map((x) => x.id === d.id ? { ...x, statut: 'refuse' } : x))
-    } else {
-      updateDevis(d.id, { statut: 'refuse' })
-    }
+    await updateDevisStatut(d.id, 'refuse', 'en_attente_validation')
+    setSupabaseDevis((prev) => prev.map((x) => x.id === d.id ? { ...x, statut: 'refuse' } : x))
     toast.info(`Devis ${d.numero || ''} refusé — l'ouvrier en sera informé`)
     setValidating((v) => { const n = { ...v }; delete n[d.id]; return n })
   }
@@ -463,13 +450,8 @@ export default function Devis() {
               devis={d}
               onDuplicate={() => openDuplicate(d)}
               onStatus={async (statut) => {
-                if (d._source === 'supabase') {
-                  // Devis créé par un ouvrier dans Supabase → update via service
-                  await updateDevisStatut(d.id, statut)
-                  setSupabaseDevis((prev) => prev.map((x) => x.id === d.id ? { ...x, statut } : x))
-                } else {
-                  updateDevis(d.id, { statut })
-                }
+                await updateDevisStatut(d.id, statut)
+                setSupabaseDevis((prev) => prev.map((x) => x.id === d.id ? { ...x, statut } : x))
               }}
               onDownload={() => handleDownload(d)}
               onEmail={() => handleEmail(d)}

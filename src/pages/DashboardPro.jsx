@@ -5,7 +5,6 @@ import {
   ChevronLeft, AlertTriangle, Award, Clock, Receipt,
   HardHat, Users, RefreshCw,
 } from 'lucide-react'
-import { useDevis } from '../hooks/useDevis'
 import { useChantiers } from '../hooks/useChantiers'
 import { useOuvriers } from '../hooks/useOuvriers'
 import { listDevisAuthenticated, normalizeDevis } from '../services/devisService'
@@ -21,7 +20,6 @@ function devisDate(d) { return new Date(d.dateEmission || d.date || d.createdAt 
 
 // ── Page ─────────────────────────────────────────────────────────
 export default function DashboardPro() {
-  const { devis }                  = useDevis()
   const { chantiers, loading: loadingChantiers, refresh: refreshChantiers } = useChantiers()
   const { ouvriers }               = useOuvriers()
   const navigate                   = useNavigate()
@@ -61,10 +59,9 @@ export default function DashboardPro() {
     return () => supabase.removeChannel(channel)
   }, [entreprise?.id, fetchDevis, refreshChantiers])
 
-  // ── Fusion devis local + Supabase ────────────────────────────────
-  // mergeDevis garantit qu'un devis 'accepte' gagne toujours sur 'envoye',
-  // même si les deux sources ont des copies du même numéro.
-  const allDevis = useMemo(() => mergeDevis(devis, supabaseDevis), [devis, supabaseDevis])
+  // ── Source unique : Supabase ─────────────────────────────────────
+  // mergeDevis([], …) déduplique les doublons hérités (statut le plus avancé gagne).
+  const allDevis = useMemo(() => mergeDevis([], supabaseDevis), [supabaseDevis])
 
   // ── Calculs stats ────────────────────────────────────────────────
   const stats = useMemo(() => {
