@@ -14,6 +14,9 @@
 -- Idempotent : peut être relancé sans danger.
 -- =============================================================================
 
+-- 0) Colonne donnees_json sur artisan_profil (stockage params étendus + RPC)
+ALTER TABLE public.artisan_profil ADD COLUMN IF NOT EXISTS donnees_json jsonb;
+
 -- 1) RPC : contexte de signature (devis + signature + artisan) pour UN token
 CREATE OR REPLACE FUNCTION public.get_signature_context(p_token text)
 RETURNS json

@@ -113,8 +113,8 @@ export default function Signer() {
       const artSig = artisanProfile?.signature_base64 || sigData.signature_artisan_base64 || null
       setArtisanSig(artSig)
 
-      // Infos artisan (ville, nom, siret…) depuis donnees_json
-      setArtisanInfo(artisanProfile?.donnees_json ?? {})
+      // Infos artisan : donnees_json si présent, sinon les colonnes simples
+      setArtisanInfo(artisanProfile?.donnees_json ?? artisanProfile ?? {})
 
       setState(S.ready)
     }

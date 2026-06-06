@@ -181,25 +181,32 @@ function profilPayloadFromForm(form) {
   return { ...indexed, donnees_json }
 }
 
+// Si la colonne donnees_json n'existe pas encore, on retire ce champ et on
+// réessaie (résilience identique à celle des devis).
+function isMissingDonneesJson(error) {
+  const m = (error?.message || '').toLowerCase()
+  return m.includes('donnees_json') || m.includes('could not find') || m.includes('schema cache')
+}
+
 export async function saveArtisanProfilSupabase(localParams) {
   const payload = profilPayloadFromForm(localParams)
   const id = localStorage.getItem(PROFILE_ID_KEY)
 
   if (id) {
-    const { error } = await supabase
-      .from('artisan_profil')
-      .update(payload)
-      .eq('id', id)
+    let { error } = await supabase.from('artisan_profil').update(payload).eq('id', id)
+    if (error && isMissingDonneesJson(error)) {
+      const { donnees_json, ...flat } = payload
+      ;({ error } = await supabase.from('artisan_profil').update(flat).eq('id', id))
+    }
     if (error) console.error('[saveArtisanProfilSupabase] UPDATE error:', error.message)
     return { error }
   }
 
-  const { data, error } = await supabase
-    .from('artisan_profil')
-    .insert(payload)
-    .select('id')
-    .single()
-
+  let { data, error } = await supabase.from('artisan_profil').insert(payload).select('id').single()
+  if (error && isMissingDonneesJson(error)) {
+    const { donnees_json, ...flat } = payload
+    ;({ data, error } = await supabase.from('artisan_profil').insert(flat).select('id').single())
+  }
   if (error) console.error('[saveArtisanProfilSupabase] INSERT error:', error.message)
   if (data?.id) localStorage.setItem(PROFILE_ID_KEY, data.id)
   return { error }
