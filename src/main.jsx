@@ -1,47 +1,16 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import { registerSW } from 'virtual:pwa-register'
 import App from './App'
 import './index.css'
 import { testSupabaseConnection } from './services/supabase'
 import { startOfflineSync } from './services/offlineSync'
 
-// ── Service Worker — mise à jour agressive ────────────────────────
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', async () => {
-    try {
-      const reg = await navigator.serviceWorker.register('/sw.js', {
-        updateViaCache: 'none', // force le navigateur à toujours vérifier le SW sur le serveur
-      })
+// Enregistrement du service worker (géré par Workbox via vite-plugin-pwa).
+// La mise à jour s'applique proprement, sans mélange d'anciens fichiers en cache.
+registerSW({ immediate: true })
 
-      // Dès qu'un nouveau SW est trouvé, on l'active immédiatement
-      reg.addEventListener('updatefound', () => {
-        const newSW = reg.installing
-        if (!newSW) return
-
-        newSW.addEventListener('statechange', () => {
-          if (newSW.state === 'installed') {
-            // Envoie SKIP_WAITING qu'il y ait un ancien SW actif ou non
-            newSW.postMessage({ type: 'SKIP_WAITING' })
-          }
-        })
-      })
-
-      // Quand le SW prend le contrôle, recharge la page pour servir les nouveaux fichiers
-      let refreshing = false
-      navigator.serviceWorker.addEventListener('controllerchange', () => {
-        if (!refreshing) {
-          refreshing = true
-          window.location.reload()
-        }
-      })
-
-      // Vérifie immédiatement si une mise à jour est disponible
-      reg.update().catch(() => {})
-
-    } catch { /* silencieux si SW non supporté */ }
-  })
-}
-
+// Vérification des tables Supabase au démarrage
 testSupabaseConnection()
 
 // Synchro auto des actions hors-ligne (pointages, messages) à la reconnexion

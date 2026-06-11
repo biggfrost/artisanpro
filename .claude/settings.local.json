@@ -14,7 +14,21 @@
       "PowerShell(Copy-Item \"C:\\\\Users\\\\vladime\\\\app artisan\\\\public\\\\sw.js\" \"C:\\\\Users\\\\vladime\\\\app artisan\\\\dist\\\\sw.js\" -Force)",
       "PowerShell(cd \"C:\\\\Users\\\\vladime\\\\app artisan\"; npm run build 2>&1 | Where-Object { $_ -match \"error|warning|built\" } | Select-Object -Last 15)",
       "mcp__Claude_Preview__preview_start",
-      "PowerShell($env:Path = [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"User\"\\); gh --version 2>&1 | Select-Object -First 1)"
+      "PowerShell($env:Path = [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"User\"\\); gh --version 2>&1 | Select-Object -First 1)",
+      "Read(//c/Users/vladime/**)",
+      "Bash(npx create-expo-app@latest finance-app --template blank)",
+      "PowerShell(ls \"C:\\\\Users\\\\vladime\\\\finance-app\\\\node_modules\" | Where-Object { $_.Name -match \"navigation|async-storage|linear-gradient|safe-area|screens\" } | Select-Object Name)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d.get\\('version','?'\\)\\)\")",
+      "Bash(./node_modules/.bin/expo install *)",
+      "Bash(python3 -c ' *)",
+      "Bash(xargs grep -l \"fetch\\\\|http\\\\|axios\\\\|XMLHttpRequest\\\\|url\\\\|api\")",
+      "Bash(npm list *)",
+      "Bash(npx eas-cli *)",
+      "Bash(eas --version)",
+      "PowerShell(try { $r = Invoke-WebRequest -Uri \"http://localhost:5055/\" -UseBasicParsing -TimeoutSec 5; \"Statut: $\\($r.StatusCode\\) — contient root? $\\([bool]\\($r.Content -match 'id=.root.'\\)\\)\" } catch { \"Erreur: $\\($_.Exception.Message\\)\" })",
+      "Bash(npx expo *)",
+      "Bash(node scripts/postbuild.js)",
+      "Bash(npx gh-pages *)"
     ]
   }
 }
